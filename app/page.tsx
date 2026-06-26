@@ -2,6 +2,16 @@
 
 import { useEffect, useState, useCallback } from "react";
 
+type Goal = any;
+type Task = any;
+type History = Record<string, any>;
+type Streaks = Record<string, any>;
+
+const [goals, setGoals] = useState<Goal[]>([]);
+const [history, setHistory] = useState<History>({});
+const [streaks, setStreaks] = useState<Streaks>({});
+
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CATEGORIES = ["Health","Career","Learning","Finance","Personal","Other"];
 const PRIORITIES  = ["High","Medium","Low"];
@@ -26,10 +36,11 @@ function useIsMobile() {
   const check = () => typeof window !== "undefined" && window.innerWidth < 768;
   const [mobile, setMobile] = useState(check);
   useEffect(() => {
-    const fn = () => setMobile(check());
-    window.addEventListener("resize", fn);
-    return () => window.removeEventListener("resize", fn);
-  }, []);
+  const fn = () => setMobile(typeof window !== "undefined" && window.innerWidth < 768);
+  window.addEventListener("resize", fn);
+  fn();
+  return () => window.removeEventListener("resize", fn);
+}, []);
   return mobile;
 }
 
@@ -622,7 +633,9 @@ export default function GoalSet() {
               const color=CAT_COLOR[g.category]||"#f59e0b";
               const total=vals.reduce((a,b)=>a+b,0);
               const activeDays=vals.filter(v=>v>0).length;
-              const sw=isMobile?Math.floor((window.innerWidth-120)):220;
+              const sw = isMobile
+              ? Math.max(180, (typeof window !== "undefined" ? window.innerWidth - 120 : 220))
+              : 220;
               return (
                 <div key={g.id} style={{marginBottom:16}}>
                   <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
