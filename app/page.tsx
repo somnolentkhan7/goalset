@@ -255,8 +255,8 @@ export default function GoalSet() {
       return goal.tasks.reduce((acc,t)=>acc+(dd[`${goal.id}-${t.id}`]?t.progressValue:0),0);
     });
   }
-  const bestStreak = Object.values(streaks).reduce(
-  (max, s) => Math.max(max, s.count ?? 0),
+  const bestStreak = Object.values(streaks).reduce<number>(
+  (max, s: any) => Math.max(max, s?.count ?? 0),
   0
 );
   const activeStreaks = Object.entries(streaks).filter(([, s]) => {
