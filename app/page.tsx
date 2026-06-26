@@ -1,65 +1,819 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useState, useCallback } from "react";
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const CATEGORIES = ["Health","Career","Learning","Finance","Personal","Other"];
+const PRIORITIES  = ["High","Medium","Low"];
+const PRIORITY_COLOR = { High:"#f87171", Medium:"#fbbf24", Low:"#34d399" };
+const CAT_COLOR = {
+  Health:"#818cf8", Career:"#38bdf8", Learning:"#a78bfa",
+  Finance:"#34d399", Personal:"#f472b6", Other:"#94a3b8",
+};
+const smoothBar = {
+  transition: "width 700ms cubic-bezier(0.22, 1, 0.36, 1)"
+};
+const DAYS   = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const MONTHS = ["January","February","March","April","May","June",
+                "July","August","September","October","November","December"];
+
+function todayKey() { return new Date().toISOString().slice(0,10); }
+function daysUntil(d) { if (!d) return null; return Math.ceil((new Date(d)-new Date())/86400000); }
+function dateKey(y,m,d) { return `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`; }
+
+// ─── useIsMobile ──────────────────────────────────────────────────────────────
+function useIsMobile() {
+  const check = () => typeof window !== "undefined" && window.innerWidth < 768;
+  const [mobile, setMobile] = useState(check);
+  useEffect(() => {
+    const fn = () => setMobile(check());
+    window.addEventListener("resize", fn);
+    return () => window.removeEventListener("resize", fn);
+  }, []);
+  return mobile;
+}
+
+// ─── Ring ─────────────────────────────────────────────────────────────────────
+function Ring({ pct, size=56, stroke=5, color="#f59e0b", children }) {
+  const r=(size-stroke)/2, circ=2*Math.PI*r;
+  const offset=circ-Math.min(pct,100)/100*circ;
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <div style={{position:"relative",width:size,height:size,flexShrink:0}}>
+      <svg width={size} height={size} style={{transform:"rotate(-90deg)",position:"absolute"}}>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#1e293b" strokeWidth={stroke}/>
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth={stroke}
+          strokeDasharray={circ}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+          style={{
+            transition: "stroke-dashoffset 700ms cubic-bezier(0.22, 1, 0.36, 1)"
+          }}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+      </svg>
+      <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>{children}</div>
+    </div>
+  );
+}
+
+// ─── Sparkline ────────────────────────────────────────────────────────────────
+function Sparkline({ values, color, width=200, height=32 }) {
+  const max=Math.max(...values,1);
+  const barW=Math.floor((width-(values.length-1)*2)/values.length);
+  return (
+    <svg width={width} height={height} style={{display:"block",flexShrink:0}}>
+      {values.map((v,i)=>{
+        const bh=Math.max(2,Math.round((v/max)*height));
+        return <rect key={i} x={i*(barW+2)} y={height-bh} width={barW} height={bh}
+          fill={v>0?color:"#162032"} rx={2} opacity={v>0?0.85:1}/>;
+      })}
+    </svg>
+  );
+}
+
+// ─── Bottom Sheet (mobile modal) ─────────────────────────────────────────────
+function BottomSheet({ open, onClose, title, children }) {
+  if (!open) return null;
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:200,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
+      <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.6)"}} onClick={onClose}/>
+      <div style={{position:"relative",background:"#0f172a",borderRadius:"20px 20px 0 0",
+        padding:"0 0 env(safe-area-inset-bottom,16px)",maxHeight:"90vh",display:"flex",flexDirection:"column"}}>
+        {/* Handle */}
+        <div style={{display:"flex",justifyContent:"center",padding:"12px 0 4px"}}>
+          <div style={{width:36,height:4,borderRadius:2,background:"#334155"}}/>
+        </div>
+        {title && <div style={{fontSize:17,fontWeight:700,color:"#f1f5f9",padding:"4px 20px 14px",borderBottom:"1px solid #1e293b"}}>{title}</div>}
+        <div style={{overflowY:"auto",padding:"16px 20px 8px",flex:1}}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Checkmark SVG ───────────────────────────────────────────────────────────
+const Check = () => (
+  <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+    <path d="M1 4L3.5 6.5L9 1" stroke="#080c14" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN APP
+// ─────────────────────────────────────────────────────────────────────────────
+export default function GoalSet() {
+  const isMobile = useIsMobile();
+
+  const [tab,setTab]                     = useState("Today");
+  const [goals,setGoals]                 = useState([]);
+  const [completedToday,setCompletedToday] = useState({});
+  const [streaks,setStreaks]             = useState({});
+  const [history,setHistory]             = useState({});
+  const [showGoalModal,setShowGoalModal] = useState(false);
+  const [showTaskModal,setShowTaskModal] = useState(null);
+  const [expandedGoal,setExpandedGoal]   = useState(null);
+  const [toast,setToast]                 = useState(null);
+
+  const now = new Date();
+  const [calYear,setCalYear]   = useState(now.getFullYear());
+  const [calMonth,setCalMonth] = useState(now.getMonth());
+  const [selectedDay,setSelectedDay] = useState(null);
+
+  const [gForm,setGForm] = useState({title:"",description:"",target:"",unit:"",category:"Personal",priority:"Medium",dueDate:""});
+  const [tForm,setTForm] = useState({label:"",progressValue:"1",note:""});
+
+  // ── Persistence ──────────────────────────────────────────────────────────
+  useEffect(()=>{
+    const g=localStorage.getItem("gs-goals");   if(g)setGoals(JSON.parse(g));
+    const s=localStorage.getItem("gs-streaks"); if(s)setStreaks(JSON.parse(s));
+    const h=localStorage.getItem("gs-history"); if(h)setHistory(JSON.parse(h));
+    const c=localStorage.getItem("gs-completed");
+    if(c){const p=JSON.parse(c);if(p.date===todayKey())setCompletedToday(p.tasks||{});}
+  },[]);
+  useEffect(()=>{localStorage.setItem("gs-goals",JSON.stringify(goals));},[goals]);
+  useEffect(()=>{localStorage.setItem("gs-streaks",JSON.stringify(streaks));},[streaks]);
+  useEffect(()=>{localStorage.setItem("gs-history",JSON.stringify(history));},[history]);
+  useEffect(()=>{
+    const today=todayKey();
+    localStorage.setItem("gs-completed",JSON.stringify({date:today,tasks:completedToday}));
+    setHistory(prev=>({...prev,[today]:completedToday}));
+  },[completedToday]);
+
+  // ── Toast ─────────────────────────────────────────────────────────────────
+  function showToast(msg){setToast(msg);setTimeout(()=>setToast(null),2200);}
+
+  // ── Goal CRUD ─────────────────────────────────────────────────────────────
+  function addGoal(){
+    if(!gForm.title.trim())return;
+    setGoals(prev=>[{id:Date.now(),...gForm,target:Number(gForm.target)||0,current:0,tasks:[],createdAt:new Date().toISOString()},...prev]);
+    setGForm({title:"",description:"",target:"",unit:"",category:"Personal",priority:"Medium",dueDate:""});
+    setShowGoalModal(false);showToast("Goal created ✓");
+  }
+  function deleteGoal(id){setGoals(prev=>prev.filter(g=>g.id!==id));setExpandedGoal(null);}
+  function updateGoalProgress(id,delta){
+    setGoals(prev=>prev.map(g=>g.id===id?{...g,current:Math.max(0,Math.min(g.target,g.current+delta))}:g));
+  }
+
+  // ── Task CRUD ─────────────────────────────────────────────────────────────
+  function addTask(goalId){
+    if(!tForm.label.trim())return;
+    const t={id:Date.now(),label:tForm.label,progressValue:Number(tForm.progressValue)||1,note:tForm.note};
+    setGoals(prev=>prev.map(g=>g.id===goalId?{...g,tasks:[...g.tasks,t]}:g));
+    setTForm({label:"",progressValue:"1",note:""});setShowTaskModal(null);showToast("Daily task added ✓");
+  }
+  function deleteTask(goalId,taskId){
+    setGoals(prev=>prev.map(g=>g.id===goalId?{...g,tasks:g.tasks.filter(t=>t.id!==taskId)}:g));
+  }
+
+  // ── Toggle task ───────────────────────────────────────────────────────────
+  function toggleTask(goalId,task){
+    const key=`${goalId}-${task.id}`;
+    const wasDone=!!completedToday[key];
+    setCompletedToday(prev=>({...prev,[key]:!wasDone}));
+    updateGoalProgress(goalId,wasDone?-task.progressValue:task.progressValue);
+    if(!wasDone){
+      if (navigator.vibrate) navigator.vibrate(20);
+      const today=todayKey();
+      const ex=streaks[key]||{count:0,lastDate:null};
+      const yest=new Date();yest.setDate(yest.getDate()-1);
+      const yKey=yest.toISOString().slice(0,10);
+      const newCount=ex.lastDate===yKey?ex.count+1:1;
+      setStreaks(prev=>({...prev,[key]:{count:newCount,lastDate:today}}));
+      if(newCount>1)showToast(`🔥 ${newCount}-day streak!`);else showToast("Task done ✓");
+    }
+  }
+
+  // ── Derived ───────────────────────────────────────────────────────────────
+  const allTasks=goals.flatMap(g=>g.tasks.map(t=>({...t,goalId:g.id,goalTitle:g.title,goalColor:CAT_COLOR[g.category]||"#f59e0b"})));
+  const todayDoneCount=allTasks.filter(t=>completedToday[`${t.goalId}-${t.id}`]).length;
+  const todayTotal=allTasks.length;
+  const todayPct=todayTotal===0?0:Math.round(todayDoneCount/todayTotal*100);
+
+  // ── Calendar helpers ──────────────────────────────────────────────────────
+  function getDayCompletion(dateStr){
+    const d=history[dateStr];if(!d)return null;
+    const keys=Object.keys(d);if(!keys.length)return null;
+    return keys.filter(k=>d[k]).length/keys.length;
+  }
+  function getDayColor(pct){
+    if(pct===null)return null;
+    if(pct===0)return "#1e293b";
+    if(pct<0.5)return "#92400e";
+    if(pct<1)return "#d97706";
+    return "#34d399";
+  }
+  function getGoalSparkline(goal){
+    return Array.from({length:30},(_,i)=>{
+      const d=new Date();d.setDate(d.getDate()-(29-i));
+      const dk=d.toISOString().slice(0,10);
+      const dd=history[dk]||{};
+      return goal.tasks.reduce((acc,t)=>acc+(dd[`${goal.id}-${t.id}`]?t.progressValue:0),0);
+    });
+  }
+  const bestStreak=Object.values(streaks).reduce((max,s)=>Math.max(max,s.count||0),0);
+  const activeStreaks=Object.entries(streaks).filter(([,s])=>{
+    const yest=new Date();yest.setDate(yest.getDate()-1);
+    return s.lastDate===todayKey()||s.lastDate===yest.toISOString().slice(0,10);
+  }).length;
+
+  // ─── SHARED FORM CONTENT ─────────────────────────────────────────────────
+  const inp = {width:"100%",background:"#080c14",border:"1px solid #1e293b",borderRadius:8,
+    padding:"11px 13px",color:"#f1f5f9",fontSize:15,outline:"none",marginBottom:14,boxSizing:"border-box"};
+  const sel = {...inp,appearance:"none"};
+  const lbl = {fontSize:11,color:"#64748b",display:"block",textTransform:"uppercase",
+    letterSpacing:"0.06em",marginBottom:5};
+  const amberBtn = {background:"#f59e0b",color:"#080c14",border:"none",borderRadius:8,
+    padding:"12px 20px",fontWeight:700,fontSize:15,cursor:"pointer",flex:1};
+  const ghostBtn = {background:"transparent",color:"#64748b",border:"1px solid #1e293b",
+    borderRadius:8,padding:"11px 20px",fontSize:14,cursor:"pointer",flex:1};
+
+  function GoalFormFields(){
+    return (
+      <>
+        <label style={lbl}>What's the goal?</label>
+        <input style={inp} placeholder="e.g. Run a 5K" value={gForm.title} onChange={e=>setGForm(f=>({...f,title:e.target.value}))}/>
+        <label style={lbl}>Why does it matter?</label>
+        <textarea style={{...inp,resize:"vertical",minHeight:72}} placeholder="Optional — your motivation..."
+          value={gForm.description} onChange={e=>setGForm(f=>({...f,description:e.target.value}))}/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <div><label style={lbl}>Target</label><input style={inp} type="number" placeholder="100" value={gForm.target} onChange={e=>setGForm(f=>({...f,target:e.target.value}))}/></div>
+          <div><label style={lbl}>Unit</label><input style={inp} placeholder="km, pages…" value={gForm.unit} onChange={e=>setGForm(f=>({...f,unit:e.target.value}))}/></div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <div><label style={lbl}>Category</label>
+            <select style={sel} value={gForm.category} onChange={e=>setGForm(f=>({...f,category:e.target.value}))}>
+              {CATEGORIES.map(c=><option key={c}>{c}</option>)}
+            </select>
+          </div>
+          <div><label style={lbl}>Priority</label>
+            <select style={sel} value={gForm.priority} onChange={e=>setGForm(f=>({...f,priority:e.target.value}))}>
+              {PRIORITIES.map(p=><option key={p}>{p}</option>)}
+            </select>
+          </div>
+        </div>
+        <label style={lbl}>Due date (optional)</label>
+        <input style={{...inp,colorScheme:"dark"}} type="date" value={gForm.dueDate} onChange={e=>setGForm(f=>({...f,dueDate:e.target.value}))}/>
+        <div style={{fontSize:12,color:"#475569",marginBottom:16}}>💡 Add daily tasks after creating the goal.</div>
+        <div style={{display:"flex",gap:10}}>
+          <button style={amberBtn} onClick={addGoal}>Create Goal</button>
+          <button style={ghostBtn} onClick={()=>setShowGoalModal(false)}>Cancel</button>
+        </div>
+      </>
+    );
+  }
+
+  function TaskFormFields({ goalId }){
+    const g=goals.find(x=>x.id===goalId);
+    return (
+      <>
+        <div style={{fontSize:12,color:"#475569",marginBottom:16}}>For: <strong style={{color:"#94a3b8"}}>{g?.title}</strong></div>
+        <label style={lbl}>Task name</label>
+        <input style={inp} placeholder="e.g. Run 20 minutes" value={tForm.label}
+          onChange={e=>setTForm(f=>({...f,label:e.target.value}))}
+          onKeyDown={e=>e.key==="Enter"&&addTask(goalId)}/>
+        <label style={lbl}>Progress per completion ({g?.unit||"pts"})</label>
+        <input style={inp} type="number" placeholder="1" value={tForm.progressValue}
+          onChange={e=>setTForm(f=>({...f,progressValue:e.target.value}))}/>
+        <label style={lbl}>Note (optional)</label>
+        <input style={inp} placeholder="e.g. Outdoors only" value={tForm.note}
+          onChange={e=>setTForm(f=>({...f,note:e.target.value}))}/>
+        <div style={{display:"flex",gap:10}}>
+          <button style={amberBtn} onClick={()=>addTask(goalId)}>Add Task</button>
+          <button style={ghostBtn} onClick={()=>setShowTaskModal(null)}>Cancel</button>
+        </div>
+      </>
+    );
+  }
+
+  // ─── SHARED VIEW COMPONENTS ───────────────────────────────────────────────
+
+  function TodayContent(){
+    const dateStr=new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
+    const hl=todayTotal===0?"No tasks yet":todayPct===100?"All done today 🎉":`${todayDoneCount} of ${todayTotal} done`;
+    const byGoal=goals.filter(g=>g.tasks.length>0).map(g=>({...g,tasks:g.tasks.map(t=>({...t,done:!!completedToday[`${g.id}-${t.id}`]}))}));
+    const noTask=goals.filter(g=>g.tasks.length===0);
+
+    return (
+      <>
+        {/* Banner */}
+        <div style={{background:"#0c1220",border:"1px solid #162032",borderRadius:isMobile?14:12,
+          padding:isMobile?"18px 20px":"20px 24px",marginBottom:20,display:"flex",alignItems:"center",gap:18}}>
+          <Ring pct={todayPct} size={isMobile?60:64} stroke={6} color={todayPct===100?"#34d399":"#f59e0b"}>
+            <span style={{fontSize:12,fontWeight:700,color:todayPct===100?"#34d399":"#f59e0b"}}>{todayPct}%</span>
+          </Ring>
+          <div style={{flex:1}}>
+            <div style={{fontSize:11,color:"#475569",marginBottom:4}}>{dateStr}</div>
+            <div style={{fontSize:isMobile?18:20,fontWeight:700,color:todayPct===100?"#34d399":"#f1f5f9"}}>{hl}</div>
+            <div style={{fontSize:13,color:"#64748b",marginTop:3}}>
+              {todayTotal===0?"Add tasks to your goals to get started.":"Every task moves you closer."}
+            </div>
+          </div>
+        </div>
+
+        {byGoal.length===0&&(
+          <div style={{color:"#334155",textAlign:"center",marginTop:48,fontSize:14,lineHeight:1.8}}>
+            No daily tasks yet.<br/>
+            <span style={{color:"#f59e0b",cursor:"pointer"}} onClick={()=>setTab("Goals")}>Go to Goals →</span>
+          </div>
+        )}
+
+        {byGoal.map(g=>{
+          const color=CAT_COLOR[g.category]||"#f59e0b";
+          const pct=g.target>0?Math.min(Math.round(g.current/g.target*100),100):0;
+          return (
+            <div key={g.id}>
+              <div style={{fontSize:11,fontWeight:600,color:"#334155",textTransform:"uppercase",
+                letterSpacing:"0.08em",marginBottom:8,marginTop:20}}>
+                <span style={{color}}>{g.category}</span>{" · "}<span style={{color:"#475569"}}>{g.title}</span>
+                <span style={{color:"#334155",marginLeft:8}}>{pct}%</span>
+              </div>
+              {g.tasks.map(t=>{
+                const key=`${g.id}-${t.id}`,str=streaks[key];
+                return (
+                  <div key={t.id} style={{display:"flex",alignItems:"center",gap:12,
+                    background:t.done?"#0c1220":"#0f172a",
+                    border:`1px solid ${t.done?"#162032":"#1e293b"}`,
+                    borderRadius:isMobile?12:10,padding:isMobile?"14px 16px":"12px 16px",
+                    marginBottom:8,opacity:t.done?0.55:1,transition:"all 0.2s"}}>
+                    <div style={{width:isMobile?24:20,height:isMobile?24:20,borderRadius:"50%",flexShrink:0,
+                      cursor:"pointer",border:`2px solid ${t.done?color:"#334155"}`,
+                      background: t.done ? color : "transparent",
+                      transform: t.done ? "scale(1.05)" : "scale(1)",
+                      transition: "all 180ms cubic-bezier(0.2, 0.8, 0.2, 1)"}}
+                      onClick={()=>toggleTask(g.id,t)}>
+                      {t.done&&<Check/>}
+                    </div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:isMobile?15:14,fontWeight:500,
+                        color:t.done?"#475569":"#e2e8f0",textDecoration:t.done?"line-through":"none"}}>{t.label}</div>
+                      {t.note&&<div style={{fontSize:11,color:"#475569",marginTop:2}}>{t.note}</div>}
+                    </div>
+                    {str&&str.count>1&&<span style={{fontSize:11,color:"#f59e0b",fontWeight:600}}>🔥{str.count}d</span>}
+                    <span style={{fontSize:11,color:"#64748b",whiteSpace:"nowrap"}}>+{t.progressValue} {g.unit||"pts"}</span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+
+        {noTask.length>0&&(
+          <>
+            <div style={{fontSize:11,fontWeight:600,color:"#334155",textTransform:"uppercase",
+              letterSpacing:"0.08em",marginBottom:8,marginTop:28}}>Goals without tasks</div>
+            {noTask.map(g=>(
+              <div key={g.id} style={{display:"flex",alignItems:"center",gap:12,
+                background:"#0f172a",border:"1px solid #1e293b",borderRadius:isMobile?12:10,
+                padding:"12px 16px",marginBottom:8,opacity:0.5}}>
+                <Ring pct={0} size={32} stroke={3} color={CAT_COLOR[g.category]||"#f59e0b"}>
+                  <span style={{fontSize:9,color:"#64748b"}}>0%</span>
+                </Ring>
+                <div style={{flex:1,fontSize:14,color:"#94a3b8"}}>{g.title}</div>
+                <button style={{background:"transparent",color:"#64748b",border:"1px solid #1e293b",
+                  borderRadius:7,padding:"6px 12px",fontSize:12,cursor:"pointer"}}
+                  onClick={()=>{setTab("Goals");setExpandedGoal(g.id);}}>Add tasks →</button>
+              </div>
+            ))}
+          </>
+        )}
+      </>
+    );
+  }
+
+  function GoalsContent(){
+    return (
+      <>
+        {goals.length===0&&(
+          <div style={{color:"#334155",textAlign:"center",marginTop:48,fontSize:14,lineHeight:1.8}}>
+            No goals yet.<br/>Tap "+ New Goal" to get started.
+          </div>
+        )}
+        {goals.map(g=>{
+          const exp=expandedGoal===g.id;
+          const pct=g.target>0?Math.min(Math.round(g.current/g.target*100),100):0;
+          const color=CAT_COLOR[g.category]||"#f59e0b";
+          const days=daysUntil(g.dueDate);
+          const doneToday=g.tasks.filter(t=>completedToday[`${g.id}-${t.id}`]).length;
+          return (
+            <div key={g.id} style={{background:"#0f172a",border:`1px solid ${exp?"#f59e0b44":"#1e293b"}`,
+              borderRadius:isMobile?14:12,marginBottom:12,overflow:"hidden"}}>
+              <div style={{display:"flex",alignItems:"center",gap:14,padding:isMobile?"16px 18px":"16px 20px",cursor:"pointer"}}
+                onClick={()=>setExpandedGoal(exp?null:g.id)}>
+                <Ring pct={pct} size={isMobile?48:52} stroke={5} color={pct>=100?"#34d399":color}>
+                  <span style={{fontSize:10,fontWeight:700,color:pct>=100?"#34d399":color}}>{pct}%</span>
+                </Ring>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{marginBottom:4}}>
+                    <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:20,
+                      background:color+"22",color,marginRight:4}}>{g.category}</span>
+                    <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:20,
+                      background:PRIORITY_COLOR[g.priority]+"22",color:PRIORITY_COLOR[g.priority]}}>{g.priority}</span>
+                  </div>
+                  <div style={{fontSize:isMobile?15:15,fontWeight:600,color:"#f1f5f9"}}>{g.title}</div>
+                  <div style={{fontSize:12,color:"#64748b",marginTop:3}}>
+                    {g.current}/{g.target} {g.unit}
+                    {g.tasks.length>0&&<span style={{marginLeft:8}}>· {doneToday}/{g.tasks.length} today</span>}
+                    {days!==null&&<span style={{marginLeft:8,color:days<0?"#f87171":days<=7?"#fbbf24":"#475569"}}>
+                      · {days<0?`${Math.abs(days)}d overdue`:`${days}d left`}
+                    </span>}
+                  </div>
+                </div>
+                <span style={{color:"#334155",fontSize:20,fontWeight:300}}>{exp?"−":"+"}</span>
+              </div>
+              {exp&&(
+                <div
+                  style={{
+                    maxHeight: exp ? 1000 : 0,
+                    overflow: "hidden",
+                    opacity: exp ? 1 : 0,
+                    transition: "max-height 400ms ease, opacity 300ms ease",
+                    borderTop: "1px solid #162032",
+                    padding: exp ? (isMobile ? "14px 18px" : "16px 20px") : "0px 20px"
+                  }}
+                >
+                  {g.description&&<p style={{fontSize:13,color:"#64748b",marginBottom:12,marginTop:0}}>{g.description}</p>}
+                  <div style={{fontSize:11,color:"#334155",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:8}}>Progress</div>
+                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+                    <button style={{background:"#162032",border:"none",color:"#e2e8f0",borderRadius:7,
+                      width:isMobile?36:28,height:isMobile?36:28,fontSize:18,cursor:"pointer",
+                      display:"flex",alignItems:"center",justifyContent:"center"}}
+                      onClick={()=>updateGoalProgress(g.id,-1)}>−</button>
+                    <span style={{fontSize:14,fontWeight:600,minWidth:90,textAlign:"center"}}>{g.current} / {g.target} {g.unit}</span>
+                    <button style={{background:"#162032",border:"none",color:"#e2e8f0",borderRadius:7,
+                      width:isMobile?36:28,height:isMobile?36:28,fontSize:18,cursor:"pointer",
+                      display:"flex",alignItems:"center",justifyContent:"center"}}
+                      onClick={()=>updateGoalProgress(g.id,1)}>+</button>
+                  </div>
+                  <div style={{fontSize:11,color:"#334155",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:6}}>Daily Tasks</div>
+                  <p style={{fontSize:12,color:"#334155",marginBottom:10,marginTop:0}}>Checking these off moves your goal forward each day.</p>
+                  {g.tasks.length===0&&<div style={{fontSize:13,color:"#334155",marginBottom:10}}>No tasks yet.</div>}
+                  {g.tasks.map(t=>(
+                    <div key={t.id} style={{display:"flex",alignItems:"center",gap:10,
+                      padding:"9px 12px",background:"#0c1220",borderRadius:8,marginBottom:6}}>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:13,color:"#94a3b8"}}>{t.label}</div>
+                        {t.note&&<div style={{fontSize:11,color:"#475569"}}>{t.note}</div>}
+                      </div>
+                      <div style={{fontSize:11,color:"#475569"}}>+{t.progressValue} {g.unit||"pts"}</div>
+                      <button style={{background:"none",border:"none",color:"#475569",cursor:"pointer",
+                        fontSize:isMobile?16:11,padding:isMobile?"4px 8px":0}}
+                        onClick={()=>deleteTask(g.id,t.id)}>✕</button>
+                    </div>
+                  ))}
+                  <button style={{display:"flex",alignItems:"center",gap:6,background:"transparent",
+                    border:"1px dashed #1e293b",color:"#475569",borderRadius:8,
+                    padding:isMobile?"10px 14px":"7px 12px",fontSize:13,cursor:"pointer",marginTop:8,width:"100%"}}
+                    onClick={()=>setShowTaskModal(g.id)}>
+                    <span style={{fontSize:16,lineHeight:1}}>+</span> Add daily task
+                  </button>
+                  <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid #162032"}}>
+                    <button style={{background:"none",border:"none",color:"#475569",cursor:"pointer",fontSize:13,padding:0}}
+                      onClick={()=>deleteGoal(g.id)}>Delete goal</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </>
+    );
+  }
+
+  function CalendarContent(){
+    const firstDay=new Date(calYear,calMonth,1).getDay();
+    const daysInMonth=new Date(calYear,calMonth+1,0).getDate();
+    const daysInPrev=new Date(calYear,calMonth,0).getDate();
+    const cells=[];
+    for(let i=firstDay-1;i>=0;i--)cells.push({day:daysInPrev-i,inMonth:false});
+    for(let d=1;d<=daysInMonth;d++)cells.push({day:d,inMonth:true});
+    const rem=42-cells.length;
+    for(let d=1;d<=rem;d++)cells.push({day:d,inMonth:false});
+
+    const todayStr=todayKey();
+    function prevMonth(){if(calMonth===0){setCalYear(y=>y-1);setCalMonth(11);}else setCalMonth(m=>m-1);setSelectedDay(null);}
+    function nextMonth(){
+      const n=new Date();
+      if(calYear===n.getFullYear()&&calMonth===n.getMonth())return;
+      if(calMonth===11){setCalYear(y=>y+1);setCalMonth(0);}else setCalMonth(m=>m+1);setSelectedDay(null);
+    }
+    const isCurrentMonth=calYear===now.getFullYear()&&calMonth===now.getMonth();
+
+    const monthDays=Array.from({length:daysInMonth},(_,i)=>getDayCompletion(dateKey(calYear,calMonth,i+1))).filter(v=>v!==null);
+    const monthAvg=monthDays.length>0?Math.round(monthDays.reduce((a,b)=>a+b,0)/monthDays.length*100):null;
+    const perfectDays=monthDays.filter(v=>v===1).length;
+
+    let selPanel=null;
+    if(selectedDay){
+      const dd=history[selectedDay]||{};
+      const tasks=goals.flatMap(g=>g.tasks.map(t=>({key:`${g.id}-${t.id}`,label:t.label,goalTitle:g.title,goalColor:CAT_COLOR[g.category]||"#f59e0b",done:!!dd[`${g.id}-${t.id}`]})));
+      const done=tasks.filter(t=>t.done).length;
+      const pct=tasks.length>0?Math.round(done/tasks.length*100):null;
+      const dateStr=new Date(selectedDay+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"});
+      selPanel={tasks,done,pct,dateStr};
+    }
+
+    const calCellSize = isMobile ? "calc((100vw - 56px) / 7)" : "auto";
+
+    return (
+      <>
+        {/* Stats */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:20}}>
+          {[
+            {n:`${bestStreak}🔥`,l:"Best Streak"},
+            {n:activeStreaks,l:"Active Streaks"},
+            {n:monthAvg!==null?`${monthAvg}%`:"—",l:"Month Avg"},
+          ].map(s=>(
+            <div key={s.l} style={{background:"#0c1220",border:"1px solid #162032",borderRadius:10,padding:isMobile?"12px 10px":"14px 18px"}}>
+              <div style={{fontSize:isMobile?20:26,fontWeight:700,color:"#f59e0b"}}>{s.n}</div>
+              <div style={{fontSize:10,color:"#475569",marginTop:3,textTransform:"uppercase",letterSpacing:"0.05em"}}>{s.l}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Calendar */}
+        <div style={{background:"#0c1220",border:"1px solid #162032",borderRadius:14,padding:isMobile?"16px 14px":"24px",marginBottom:16}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18}}>
+            <button style={{background:"none",border:"1px solid #1e293b",color:"#94a3b8",borderRadius:6,
+              width:32,height:32,cursor:"pointer",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}
+              onClick={prevMonth}>‹</button>
+            <div style={{fontSize:isMobile?15:16,fontWeight:700,color:"#f1f5f9",textAlign:"center"}}>
+              {MONTHS[calMonth]} {calYear}
+              {monthAvg!==null&&<span style={{fontSize:11,color:"#475569",fontWeight:400,marginLeft:8}}>{perfectDays} perfect</span>}
+            </div>
+            <button style={{background:"none",border:"1px solid #1e293b",color:"#94a3b8",borderRadius:6,
+              width:32,height:32,cursor:isCurrentMonth?"default":"pointer",
+              fontSize:16,display:"flex",alignItems:"center",justifyContent:"center",opacity:isCurrentMonth?0.3:1}}
+              onClick={nextMonth}>›</button>
+          </div>
+          {/* Day headers */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:isMobile?2:4,marginBottom:4}}>
+            {DAYS.map(d=><div key={d} style={{fontSize:isMobile?9:10,color:"#334155",textAlign:"center",
+              paddingBottom:isMobile?4:6,fontWeight:600,textTransform:"uppercase"}}>{isMobile?d[0]:d}</div>)}
+          </div>
+          {/* Day cells */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:isMobile?2:4}}>
+            {cells.map((cell,i)=>{
+              const dk=cell.inMonth?dateKey(calYear,calMonth,cell.day):null;
+              const pct=dk?getDayCompletion(dk):null;
+              const isToday=dk===todayStr,isSel=dk===selectedDay;
+              const dotColor=getDayColor(pct);
+              return (
+                <div key={i} style={{
+                  aspectRatio:"1",borderRadius:isMobile?8:8,display:"flex",flexDirection:"column",
+                  alignItems:"center",justifyContent:"center",cursor:cell.inMonth?"pointer":"default",
+                  background:isSel?"#f59e0b22":"transparent",
+                  border:isToday?"1px solid #f59e0b66":isSel?"1px solid #f59e0b":"1px solid transparent",
+                  opacity:cell.inMonth?1:0.2,width:calCellSize,
+                }} onClick={()=>{if(cell.inMonth&&dk)setSelectedDay(isSel?null:dk);}}>
+                  <span style={{fontSize:isMobile?11:11,fontWeight:isToday?700:400,color:isToday?"#f59e0b":pct===1?"#34d399":"#94a3b8"}}>{cell.day}</span>
+                  <div style={{width:isMobile?5:6,height:isMobile?5:6,borderRadius:"50%",background:dotColor||"transparent",marginTop:isMobile?2:3,visibility:cell.inMonth?"visible":"hidden"}}/>
+                </div>
+              );
+            })}
+          </div>
+          {/* Legend */}
+          <div style={{display:"flex",gap:12,marginTop:14,paddingTop:12,borderTop:"1px solid #162032",flexWrap:"wrap"}}>
+            {[["#1e293b","0%"],["#92400e","<50%"],["#d97706","50–99%"],["#34d399","100%"]].map(([c,l])=>(
+              <div key={l} style={{display:"flex",alignItems:"center",gap:5}}>
+                <div style={{width:7,height:7,borderRadius:"50%",background:c}}/>
+                <span style={{fontSize:10,color:"#475569"}}>{l}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Day detail — inline on mobile, panel on desktop */}
+        {selectedDay&&selPanel&&(
+          <div style={{background:"#0c1220",border:"1px solid #162032",borderRadius:14,padding:"18px 20px",marginBottom:16}}>
+            <div style={{fontSize:15,fontWeight:700,color:"#f1f5f9",marginBottom:4}}>{selPanel.dateStr}</div>
+            <div style={{fontSize:12,color:"#475569",marginBottom:14}}>
+              {selPanel.tasks.length===0?"No tasks set up yet.":
+               selPanel.pct===100?"🎉 Perfect day!":
+               selPanel.pct===0?"Nothing completed.":
+               `${selPanel.done} of ${selPanel.tasks.length} done (${selPanel.pct}%)`}
+            </div>
+            {selPanel.tasks.map((t,i)=>(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:8,
+                padding:"8px 10px",borderRadius:8,
+                background:t.done?"#0d1f18":"#0f172a",
+                border:`1px solid ${t.done?"#14532d22":"#1e293b"}`,marginBottom:6}}>
+                <div style={{width:14,height:14,borderRadius:"50%",
+                  border:`2px solid ${t.done?"#34d399":"#334155"}`,
+                  background:t.done?"#34d399":"transparent",flexShrink:0}}/>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,color:t.done?"#34d399":"#64748b"}}>{t.label}</div>
+                  <div style={{fontSize:10,color:"#334155"}}>{t.goalTitle}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Sparklines */}
+        {goals.length>0&&(
+          <div style={{marginTop:8}}>
+            <div style={{fontSize:11,color:"#334155",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Daily progress — last 30 days</div>
+            {goals.map(g=>{
+              const vals=getGoalSparkline(g);
+              const color=CAT_COLOR[g.category]||"#f59e0b";
+              const total=vals.reduce((a,b)=>a+b,0);
+              const activeDays=vals.filter(v=>v>0).length;
+              const sw=isMobile?Math.floor((window.innerWidth-120)):220;
+              return (
+                <div key={g.id} style={{marginBottom:16}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                    <span style={{fontSize:12,color:"#94a3b8",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"60%"}}>{g.title}</span>
+                    <span style={{fontSize:11,color,fontWeight:600}}>+{total} {g.unit||"pts"}</span>
+                  </div>
+                  <Sparkline values={vals} color={color} width={sw} height={28}/>
+                  <div style={{fontSize:10,color:"#334155",marginTop:4}}>{activeDays} active days</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </>
+    );
+  }
+
+  // ─── NAV ITEMS ───────────────────────────────────────────────────────────
+  const navItems=[
+    {id:"Today",  icon:"◷", label:"Today"},
+    {id:"Goals",  icon:"◎", label:"Goals"},
+    {id:"Calendar",icon:"▦",label:"Calendar"},
+  ];
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // MOBILE LAYOUT
+  // ─────────────────────────────────────────────────────────────────────────
+  if(isMobile){
+    const headerLabels={Today:"Today's Plan",Goals:"Your Goals",Calendar:"Calendar"};
+    return (
+      <div style={{minHeight:"100vh",background:"#080c14",color:"#e2e8f0",
+        fontFamily:"system-ui,-apple-system,'Segoe UI',sans-serif",
+        paddingBottom:"calc(64px + env(safe-area-inset-bottom,0px))"}}>
+
+        {/* Mobile Header */}
+        <div style={{position:"sticky",top:0,zIndex:50,background:"#080c14",
+          borderBottom:"1px solid #162032",padding:"14px 20px",
+          display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div>
+            <div style={{fontSize:11,color:"#334155",textTransform:"uppercase",letterSpacing:"0.1em"}}>GoalSet</div>
+            <div style={{fontSize:19,fontWeight:700,color:"#f1f5f9",marginTop:1}}>{headerLabels[tab]}</div>
+          </div>
+          {tab==="Goals"&&(
+            <button style={{background:"#f59e0b",color:"#080c14",border:"none",borderRadius:10,
+              padding:"10px 16px",fontWeight:700,fontSize:14,cursor:"pointer"}}
+              onClick={()=>setShowGoalModal(true)}>+ New</button>
+          )}
+          {tab==="Today"&&todayTotal>0&&(
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:20,fontWeight:700,color:"#f59e0b"}}>{todayPct}%</div>
+              <div style={{fontSize:10,color:"#475569"}}>{todayDoneCount}/{todayTotal} done</div>
+            </div>
+          )}
+        </div>
+
+        {/* Mobile Content */}
+        <div style={{padding:"16px 16px 8px"}}>
+          {tab==="Today"    &&<TodayContent/>}
+          {tab==="Goals"    &&<GoalsContent/>}
+          {tab==="Calendar" &&<CalendarContent/>}
+        </div>
+
+        {/* Bottom Tab Bar */}
+        <div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:100,
+          background:"#0c1220",borderTop:"1px solid #162032",
+          padding:"8px 0 env(safe-area-inset-bottom,8px)",
+          display:"flex"}}>
+          {navItems.map(n=>{
+            const active=tab===n.id;
+            return (
+              <button key={n.id} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",
+                gap:3,border:"none",background:"transparent",cursor:"pointer",padding:"6px 0"}}
+                onClick={()=>setTab(n.id)}>
+                <span style={{fontSize:18,color:active?"#f59e0b":"#334155"}}>{n.icon}</span>
+                <span style={{fontSize:10,fontWeight:active?700:400,color:active?"#f59e0b":"#475569"}}>{n.label}</span>
+                {active&&<div style={{width:4,height:4,borderRadius:"50%",background:"#f59e0b"}}/>}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Bottom Sheet Modals */}
+        <BottomSheet open={showGoalModal} onClose={()=>setShowGoalModal(false)} title="New Goal">
+          <GoalFormFields/>
+        </BottomSheet>
+        <BottomSheet open={!!showTaskModal} onClose={()=>setShowTaskModal(null)} title="Add Daily Task">
+          {showTaskModal&&<TaskFormFields goalId={showTaskModal}/>}
+        </BottomSheet>
+
+        {toast&&<div style={{position:"fixed",bottom:80,left:"50%",transform:"translateX(-50%)",
+          background:"#1e293b",color:"#f1f5f9",padding:"10px 20px",borderRadius:10,
+          fontSize:14,fontWeight:500,zIndex:300,boxShadow:"0 4px 20px rgba(0,0,0,0.4)",
+          whiteSpace:"nowrap"}}>{toast}</div>}
+      </div>
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // DESKTOP LAYOUT
+  // ─────────────────────────────────────────────────────────────────────────
+  return (
+    <div style={{display:"flex",minHeight:"100vh",background:"#080c14",color:"#e2e8f0",
+      fontFamily:"system-ui,-apple-system,'Segoe UI',sans-serif"}}>
+
+      {/* Sidebar */}
+      <aside style={{width:200,background:"#0c1220",borderRight:"1px solid #162032",
+        padding:"24px 12px",display:"flex",flexDirection:"column",flexShrink:0}}>
+        <div style={{fontSize:18,fontWeight:800,color:"#f59e0b",letterSpacing:"-0.5px",marginBottom:28,paddingLeft:8}}>
+          GoalSet
+          <span style={{fontSize:10,fontWeight:400,color:"#334155",display:"block",letterSpacing:"0.1em",textTransform:"uppercase"}}>daily progress</span>
+        </div>
+        {navItems.map(n=>{
+          const a=tab===n.id;
+          return (
+            <button key={n.id} style={{display:"flex",alignItems:"center",gap:8,width:"100%",textAlign:"left",
+              padding:"9px 10px",borderRadius:7,border:"none",cursor:"pointer",fontSize:13,
+              fontWeight:a?600:400,background:a?"#162032":"transparent",color:a?"#f59e0b":"#64748b",
+              marginBottom:2,borderLeft:a?"2px solid #f59e0b":"2px solid transparent"}}
+              onClick={()=>setTab(n.id)}>
+              <span>{n.icon}</span>{n.label}
+            </button>
+          );
+        })}
+        {/* Sidebar mini progress */}
+        <div style={{marginTop:"auto",paddingTop:20,borderTop:"1px solid #162032"}}>
+          {goals.map(g=>{
+            const pct=g.target>0?Math.min(Math.round(g.current/g.target*100),100):0;
+            const color=CAT_COLOR[g.category]||"#f59e0b";
+            return (
+              <div key={g.id} style={{marginBottom:10}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                  <span style={{fontSize:11,color:"#475569",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:120}}>{g.title}</span>
+                  <span style={{fontSize:11,color,flexShrink:0}}>{pct}%</span>
+                </div>
+                <div style={{height:3,background:"#162032",borderRadius:2}}>
+                  <div
+                    style={{
+                      width: `${pct}%`,
+                      height: "100%",
+                      background: color,
+                      borderRadius: 2,
+                      ...smoothBar
+                    }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+          {goals.length===0&&<div style={{fontSize:11,color:"#334155"}}>No goals yet</div>}
+        </div>
+      </aside>
+
+      {/* Main */}
+      <main style={{flex:1,padding:"32px 36px",overflowY:"auto"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:28}}>
+          <h1 style={{fontSize:24,fontWeight:700,color:"#f1f5f9",letterSpacing:"-0.3px",margin:0}}>
+            {tab==="Today"?"Today's Plan":tab==="Goals"?"Your Goals":"Progress Calendar"}
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+          {tab==="Today"&&<button style={{background:"#f59e0b",color:"#080c14",border:"none",borderRadius:7,padding:"9px 16px",fontWeight:700,fontSize:13,cursor:"pointer"}} onClick={()=>setTab("Goals")}>Manage Goals →</button>}
+          {tab==="Goals"&&<button style={{background:"#f59e0b",color:"#080c14",border:"none",borderRadius:7,padding:"9px 16px",fontWeight:700,fontSize:13,cursor:"pointer"}} onClick={()=>setShowGoalModal(true)}>+ New Goal</button>}
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+        {tab==="Today"    &&<TodayContent/>}
+        {tab==="Goals"    &&<GoalsContent/>}
+        {tab==="Calendar" &&<CalendarContent/>}
       </main>
+
+      {/* Desktop Modals */}
+      {showGoalModal&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",display:"flex",
+          alignItems:"center",justifyContent:"center",zIndex:100}} onClick={()=>setShowGoalModal(false)}>
+          <div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:14,padding:28,
+            width:420,maxHeight:"88vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:18,fontWeight:700,color:"#f1f5f9",marginBottom:18}}>New Goal</div>
+            <GoalFormFields/>
+          </div>
+        </div>
+      )}
+      {showTaskModal&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",display:"flex",
+          alignItems:"center",justifyContent:"center",zIndex:100}} onClick={()=>setShowTaskModal(null)}>
+          <div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:14,padding:28,
+            width:380,maxHeight:"88vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:18,fontWeight:700,color:"#f1f5f9",marginBottom:18}}>Add Daily Task</div>
+            <TaskFormFields goalId={showTaskModal}/>
+          </div>
+        </div>
+      )}
+
+      {toast&&<div style={{position:"fixed",bottom:28,left:"50%",transform:"translateX(-50%)",
+        background:"#1e293b",color:"#f1f5f9",padding:"10px 20px",borderRadius:8,fontSize:13,
+        fontWeight:500,zIndex:200,boxShadow:"0 4px 20px rgba(0,0,0,0.4)",pointerEvents:"none"}}>{toast}</div>}
     </div>
   );
 }
