@@ -28,7 +28,10 @@ const MONTHS = ["January","February","March","April","May","June",
                 "July","August","September","October","November","December"];
 
 function todayKey() { return new Date().toISOString().slice(0,10); }
-function daysUntil(d) { if (!d) return null; return Math.ceil((new Date(d)-new Date())/86400000); }
+function daysUntil(d: string | null | undefined) {
+  if (!d) return null;
+  return Math.ceil((new Date(d).getTime() - new Date().getTime()) / 86400000);
+}
 function dateKey(y,m,d) { return `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`; }
 
 // ─── useIsMobile ──────────────────────────────────────────────────────────────
