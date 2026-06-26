@@ -29,6 +29,11 @@ type Streak = {
   lastDate: string | null;
 };
 
+type Streak = {
+  count: number;
+  lastDate: string | null;
+};
+
 type Streaks = Record<string, Streak>;
 
 
@@ -146,7 +151,7 @@ export default function GoalSet() {
   const [tab,setTab]                     = useState("Today");
   const [goals,setGoals]                 = useState([]);
   const [completedToday,setCompletedToday] = useState({});
-  const [streaks,setStreaks]             = useState({});
+  const [streaks, setStreaks] = useState<Streaks>({});
   const [history,setHistory]             = useState({});
   const [showGoalModal,setShowGoalModal] = useState(false);
   const [showTaskModal,setShowTaskModal] = useState(null);
@@ -164,7 +169,8 @@ export default function GoalSet() {
   // ── Persistence ──────────────────────────────────────────────────────────
   useEffect(()=>{
     const g=localStorage.getItem("gs-goals");   if(g)setGoals(JSON.parse(g));
-    const s=localStorage.getItem("gs-streaks"); if(s)setStreaks(JSON.parse(s));
+    const s = localStorage.getItem("gs-streaks");
+      if (s) setStreaks(JSON.parse(s) as Streaks);
     const h=localStorage.getItem("gs-history"); if(h)setHistory(JSON.parse(h));
     const c=localStorage.getItem("gs-completed");
     if(c){const p=JSON.parse(c);if(p.date===todayKey())setCompletedToday(p.tasks||{});}
@@ -249,8 +255,8 @@ export default function GoalSet() {
       return goal.tasks.reduce((acc,t)=>acc+(dd[`${goal.id}-${t.id}`]?t.progressValue:0),0);
     });
   }
-  const bestStreak = Object.values(streaks).reduce<number>(
-  (max, s) => Math.max(max, s?.count ?? 0),
+  const bestStreak = Object.values(streaks).reduce(
+  (max, s) => Math.max(max, s.count ?? 0),
   0
 );
   const activeStreaks = Object.entries(streaks).filter(([, s]) => {
