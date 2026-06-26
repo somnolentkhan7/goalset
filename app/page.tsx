@@ -29,7 +29,7 @@ type Streak = {
   lastDate: string | null;
 };
 
-type Streak = {
+type StreakData = {
   count: number;
   lastDate: string | null;
 };
