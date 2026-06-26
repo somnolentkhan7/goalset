@@ -7,9 +7,6 @@ type Task = any;
 type History = Record<string, any>;
 type Streaks = Record<string, any>;
 
-const [goals, setGoals] = useState<Goal[]>([]);
-const [history, setHistory] = useState<History>({});
-const [streaks, setStreaks] = useState<Streaks>({});
 
 
 // ─── Constants ────────────────────────────────────────────────────────────────
