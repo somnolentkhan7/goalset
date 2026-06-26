@@ -2,10 +2,34 @@
 
 import { useEffect, useState, useCallback } from "react";
 
-type Goal = any;
-type Task = any;
-type History = Record<string, any>;
-type Streaks = Record<string, any>;
+type Task = {
+  id: number;
+  label: string;
+  progressValue: number;
+  note?: string;
+};
+
+type Goal = {
+  id: number;
+  title: string;
+  description: string;
+  target: number;
+  current: number;
+  unit: string;
+  category: string;
+  priority: string;
+  dueDate: string;
+  createdAt: string;
+  tasks: Task[];
+};
+
+type History = Record<string, Record<string, boolean>>;
+type Streak = {
+  count: number;
+  lastDate: string | null;
+};
+
+type Streaks = Record<string, Streak>;
 
 
 
@@ -225,11 +249,20 @@ export default function GoalSet() {
       return goal.tasks.reduce((acc,t)=>acc+(dd[`${goal.id}-${t.id}`]?t.progressValue:0),0);
     });
   }
-  const bestStreak=Object.values(streaks).reduce((max,s)=>Math.max(max,s.count||0),0);
-  const activeStreaks=Object.entries(streaks).filter(([,s])=>{
-    const yest=new Date();yest.setDate(yest.getDate()-1);
-    return s.lastDate===todayKey()||s.lastDate===yest.toISOString().slice(0,10);
-  }).length;
+  const bestStreak = Object.values(streaks).reduce<number>(
+  (max, s) => Math.max(max, s?.count ?? 0),
+  0
+);
+  const activeStreaks = Object.entries(streaks).filter(([, s]) => {
+  const streak = s as Streak;
+  const yest = new Date();
+  yest.setDate(yest.getDate() - 1);
+
+  return (
+    streak.lastDate === todayKey() ||
+    streak.lastDate === yest.toISOString().slice(0, 10)
+  );
+}).length;
 
   // ─── SHARED FORM CONTENT ─────────────────────────────────────────────────
   const inp = {width:"100%",background:"#080c14",border:"1px solid #1e293b",borderRadius:8,
