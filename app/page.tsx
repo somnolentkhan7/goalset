@@ -1416,7 +1416,7 @@ export default function GoalSet() {
           display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "0 20px" }}>
           <div>
-            <div style={{ fontSize: 10, color: "#334155", textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700 }}>GoalSet</div>
+            <div style={{ fontSize: 10, color: "#334155", textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700 }}>StrongGoals</div>
             <div style={{ fontSize: 18, fontWeight: 800, color: "#f1f5f9", lineHeight: 1 }}>
               {tab === "today" ? "Today" : tab === "goals" ? "Goals" : "Progress"}
             </div>
@@ -1517,7 +1517,7 @@ export default function GoalSet() {
       <aside style={{ width: 210, background: "#0a1020", borderRight: "1px solid #162032",
         padding: "28px 14px", display: "flex", flexDirection: "column", flexShrink: 0, position: "sticky", top: 0, height: "100vh" }}>
         <div style={{ paddingLeft: 8, marginBottom: 32 }}>
-          <div style={{ fontSize: 20, fontWeight: 900, color: "#f59e0b", letterSpacing: "-0.5px" }}>GoalSet</div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: "#f59e0b", letterSpacing: "-0.5px" }}>StrongGoals</div>
           <div style={{ fontSize: 10, color: "#334155", letterSpacing: "0.1em", textTransform: "uppercase", marginTop: 1 }}>daily progress</div>
         </div>
 
