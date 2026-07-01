@@ -173,9 +173,11 @@ function Modal({ open, onClose, title, children, wide }: {
 }
 
 // ─── Shared form styles ───────────────────────────────────────────────────────
+// fontSize 16 (not 15) is deliberate: iOS Safari auto-zooms the page on focus
+// for any input under 16px, which is jarring on iPhone.
 const inp: React.CSSProperties = {
   width: "100%", background: "#080c14", border: "1px solid #1e293b", borderRadius: 10,
-  padding: "12px 14px", color: "#f1f5f9", fontSize: 15, outline: "none", marginBottom: 12,
+  padding: "12px 14px", color: "#f1f5f9", fontSize: 16, outline: "none", marginBottom: 12,
   boxSizing: "border-box", WebkitAppearance: "none",
 };
 const sel: React.CSSProperties = { ...inp, appearance: "none" as const };
@@ -186,13 +188,14 @@ const lbl: React.CSSProperties = {
 const primaryBtn: React.CSSProperties = {
   background: "#f59e0b", color: "#080c14", border: "none", borderRadius: 10,
   padding: "14px 20px", fontWeight: 700, fontSize: 15, cursor: "pointer", flex: 1,
-  WebkitTapHighlightColor: "transparent",
+  WebkitTapHighlightColor: "transparent", touchAction: "manipulation",
 };
 const ghostBtn: React.CSSProperties = {
   background: "transparent", color: "#64748b", border: "1px solid #1e293b",
   borderRadius: 10, padding: "13px 20px", fontSize: 15, cursor: "pointer", flex: 1,
-  WebkitTapHighlightColor: "transparent",
+  WebkitTapHighlightColor: "transparent", touchAction: "manipulation",
 };
+
 
 // ─── Goal Form ────────────────────────────────────────────────────────────────
 interface GoalFormProps {
