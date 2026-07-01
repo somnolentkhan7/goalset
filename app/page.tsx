@@ -151,8 +151,9 @@ interface GoalFormProps {
   setGForm: React.Dispatch<React.SetStateAction<GoalFormProps["gForm"]>>;
   onSubmit: () => void;
   onCancel: () => void;
+  submitLabel?: string;
 }
-function GoalForm({ gForm, setGForm, onSubmit, onCancel }: GoalFormProps) {
+function GoalForm({ gForm, setGForm, onSubmit, onCancel, submitLabel = "Create Goal" }: GoalFormProps) {
   return (
     <>
       <label style={lbl}>Goal title</label>
@@ -197,7 +198,7 @@ function GoalForm({ gForm, setGForm, onSubmit, onCancel }: GoalFormProps) {
         onChange={e => setGForm(f => ({ ...f, dueDate: e.target.value }))} />
 
       <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
-        <button style={primaryBtn} onClick={onSubmit}>Create Goal</button>
+        <button style={primaryBtn} onClick={onSubmit}>{submitLabel}</button>
         <button style={ghostBtn} onClick={onCancel}>Cancel</button>
       </div>
     </>
@@ -210,8 +211,9 @@ interface TaskFormProps {
   tForm: { label: string; mode: "habit" | "progress"; progressValue: string; note: string };
   setTForm: React.Dispatch<React.SetStateAction<TaskFormProps["tForm"]>>;
   onSubmit: () => void; onCancel: () => void;
+  submitLabel?: string;
 }
-function TaskForm({ goalTitle, goalUnit, tForm, setTForm, onSubmit, onCancel }: TaskFormProps) {
+function TaskForm({ goalTitle, goalUnit, tForm, setTForm, onSubmit, onCancel, submitLabel = "Add Task" }: TaskFormProps) {
   return (
     <>
       <p style={{ fontSize: 13, color: "#475569", marginTop: 0, marginBottom: 16 }}>
@@ -268,7 +270,7 @@ function TaskForm({ goalTitle, goalUnit, tForm, setTForm, onSubmit, onCancel }: 
         onChange={e => setTForm(f => ({ ...f, note: e.target.value }))} />
 
       <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
-        <button style={primaryBtn} onClick={onSubmit}>Add Task</button>
+        <button style={primaryBtn} onClick={onSubmit}>{submitLabel}</button>
         <button style={ghostBtn} onClick={onCancel}>Cancel</button>
       </div>
     </>
@@ -336,6 +338,9 @@ export default function GoalSet() {
   const [toast, setToast] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  const [editGoalId, setEditGoalId] = useState<number | null>(null);
+  const [editTaskId, setEditTaskId] = useState<number | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const now = new Date();
   const [calYear, setCalYear] = useState(now.getFullYear());
@@ -427,13 +432,43 @@ export default function GoalSet() {
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 2200); }
 
   // ── Goal CRUD ──────────────────────────────────────────────────────────────
-  function addGoal() {
-    if (!gForm.title.trim()) return;
-    setGoals(prev => [{ id: Date.now(), ...gForm, target: Number(gForm.target) || 0,
-      current: 0, tasks: [], createdAt: new Date().toISOString() }, ...prev]);
-    setGForm({ title: "", description: "", target: "", unit: "", category: "Personal", priority: "Medium", dueDate: "" });
+  const emptyGForm = { title: "", description: "", target: "", unit: "", category: "Personal", priority: "Medium", dueDate: "" };
+
+  function openNewGoal() {
+    setGForm(emptyGForm);
+    setEditGoalId(null);
+    setShowGoalModal(true);
+  }
+
+  function openEditGoal(g: Goal) {
+    setGForm({
+      title: g.title, description: g.description, target: g.target ? String(g.target) : "",
+      unit: g.unit, category: g.category, priority: g.priority, dueDate: g.dueDate,
+    });
+    setEditGoalId(g.id);
+    setShowGoalModal(true);
+  }
+
+  function closeGoalModal() {
     setShowGoalModal(false);
-    showToast("Goal created ✓");
+    setEditGoalId(null);
+  }
+
+  function saveGoal() {
+    if (!gForm.title.trim()) return;
+    if (editGoalId !== null) {
+      setGoals(prev => prev.map(g => g.id === editGoalId
+        ? { ...g, ...gForm, target: Number(gForm.target) || 0 }
+        : g));
+      showToast("Goal updated ✓");
+    } else {
+      setGoals(prev => [{ id: Date.now(), ...gForm, target: Number(gForm.target) || 0,
+        current: 0, tasks: [], createdAt: new Date().toISOString() }, ...prev]);
+      showToast("Goal created ✓");
+    }
+    setGForm(emptyGForm);
+    setEditGoalId(null);
+    setShowGoalModal(false);
   }
 
   function deleteGoal(id: number) {
@@ -478,22 +513,48 @@ export default function GoalSet() {
   }
 
   // ── Task CRUD ──────────────────────────────────────────────────────────────
-  function addTask(goalId: number) {
-    if (!tForm.label.trim()) return;
-    const t: Task = {
-      id: Date.now(),
-      label: tForm.label,
-      mode: tForm.mode,
-      progressValue:
-        tForm.mode === "habit"
-          ? 0
-          : Number(tForm.progressValue) || 1,
-      note: tForm.note,
-    };
-    setGoals(prev => prev.map(g => g.id === goalId ? { ...g, tasks: [...g.tasks, t] } : g));
-    setTForm({ label: "", mode: "habit", progressValue: "1", note: "" });
+  const emptyTForm: { label: string; mode: "habit" | "progress"; progressValue: string; note: string } =
+    { label: "", mode: "habit", progressValue: "1", note: "" };
+
+  function openNewTask(goalId: number) {
+    setTForm(emptyTForm);
+    setEditTaskId(null);
+    setShowTaskModal(goalId);
+  }
+
+  function openEditTask(goalId: number, task: Task) {
+    setTForm({
+      label: task.label, mode: task.mode,
+      progressValue: task.progressValue ? String(task.progressValue) : "1",
+      note: task.note || "",
+    });
+    setEditTaskId(task.id);
+    setShowTaskModal(goalId);
+  }
+
+  function closeTaskModal() {
     setShowTaskModal(null);
-    showToast("Task added ✓");
+    setEditTaskId(null);
+  }
+
+  function saveTask(goalId: number) {
+    if (!tForm.label.trim()) return;
+    const progressValue = tForm.mode === "habit" ? 0 : Number(tForm.progressValue) || 1;
+    if (editTaskId !== null) {
+      setGoals(prev => prev.map(g => g.id === goalId
+        ? { ...g, tasks: g.tasks.map(t => t.id === editTaskId
+            ? { ...t, label: tForm.label, mode: tForm.mode, progressValue, note: tForm.note }
+            : t) }
+        : g));
+      showToast("Task updated ✓");
+    } else {
+      const t: Task = { id: Date.now(), label: tForm.label, mode: tForm.mode, progressValue, note: tForm.note };
+      setGoals(prev => prev.map(g => g.id === goalId ? { ...g, tasks: [...g.tasks, t] } : g));
+      showToast("Task added ✓");
+    }
+    setTForm(emptyTForm);
+    setEditTaskId(null);
+    setShowTaskModal(null);
   }
 
   function deleteTask(goalId: number, taskId: number) {
@@ -575,6 +636,53 @@ export default function GoalSet() {
     });
   }
 
+  // ── Backup & Restore ───────────────────────────────────────────────────────
+  function exportData() {
+    try {
+      const payload = { exportedAt: new Date().toISOString(), goals, streaks, history };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `goalset-backup-${todayKey()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast("Backup downloaded ✓");
+    } catch {
+      showToast("Export failed");
+    }
+  }
+
+  function triggerImport() {
+    importInputRef.current?.click();
+  }
+
+  function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result as string);
+        if (!data || !Array.isArray(data.goals)) throw new Error("bad format");
+        const ok = window.confirm(
+          "This will replace your current goals, streaks, and history with the backup file. Continue?"
+        );
+        if (!ok) return;
+        setGoals(data.goals || []);
+        setStreaks(data.streaks || {});
+        setHistory(data.history || {});
+        showToast("Backup restored ✓");
+      } catch {
+        showToast("Couldn't read that file");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  }
+
   const taskModalGoal = goals.find(g => g.id === showTaskModal);
   const BOTTOM_BAR = 64;
 
@@ -640,7 +748,7 @@ export default function GoalSet() {
             <div style={{ fontSize: 40, marginBottom: 12 }}>🎯</div>
             <div style={{ fontSize: 15, fontWeight: 600, color: "#475569", marginBottom: 8 }}>No daily tasks yet</div>
             <div style={{ fontSize: 13, color: "#334155", marginBottom: 20 }}>Create a goal and add tasks to start your daily streak.</div>
-            <button onClick={() => { setTab("goals"); setShowGoalModal(true); }}
+            <button onClick={() => { setTab("goals"); openNewGoal(); }}
               style={{ ...primaryBtn, flex: "none", padding: "12px 24px", borderRadius: 10 }}>
               Create a Goal
             </button>
@@ -743,7 +851,7 @@ export default function GoalSet() {
             <div style={{ fontSize: 40, marginBottom: 12 }}>✦</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: "#475569", marginBottom: 8 }}>No goals yet</div>
             <div style={{ fontSize: 13, color: "#334155", marginBottom: 24 }}>Goals you create will appear here with progress tracking.</div>
-            <button onClick={() => setShowGoalModal(true)}
+            <button onClick={openNewGoal}
               style={{ ...primaryBtn, flex: "none", padding: "12px 28px" }}>+ New Goal</button>
           </div>
         )}
@@ -773,6 +881,10 @@ export default function GoalSet() {
                     <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 20,
                       background: color + "22", color }}>{g.category}</span>
                     <div style={{ width: 6, height: 6, borderRadius: "50%", background: PRIORITY_DOT[g.priority] }} />
+                    {pct >= 100 && g.target > 0 && (
+                      <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 20,
+                        background: "#34d39922", color: "#34d399" }}>✓ Complete</span>
+                    )}
                   </div>
                   <div style={{ fontSize: 15, fontWeight: 600, color: "#f1f5f9",
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.title}</div>
@@ -827,13 +939,16 @@ export default function GoalSet() {
                       {t.mode === "progress" && (
                         <span style={{ fontSize: 11, color: "#334155", flexShrink: 0 }}>+{t.progressValue} {g.unit || "pts"}</span>
                       )}
+                      <button onClick={() => openEditTask(g.id, t)}
+                        style={{ background: "none", border: "none", color: "#334155", cursor: "pointer",
+                          fontSize: 14, padding: "4px 6px", WebkitTapHighlightColor: "transparent" }}>✎</button>
                       <button onClick={() => deleteTask(g.id, t.id)}
                         style={{ background: "none", border: "none", color: "#334155", cursor: "pointer",
                           fontSize: 16, padding: "4px 8px", WebkitTapHighlightColor: "transparent" }}>✕</button>
                     </div>
                   ))}
 
-                  <button onClick={() => setShowTaskModal(g.id)}
+                  <button onClick={() => openNewTask(g.id)}
                     style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
                       width: "100%", background: "transparent", border: "1px dashed #1e293b", color: "#475569",
                       borderRadius: 10, padding: "11px", fontSize: 13, cursor: "pointer", marginTop: 4,
@@ -841,9 +956,10 @@ export default function GoalSet() {
                     + Add daily task
                   </button>
 
-                  <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid #162032" }}>
+                  <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid #162032",
+                    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                     {confirmDelete === g.id ? (
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, width: "100%" }}>
                         <span style={{ fontSize: 13, color: "#94a3b8", flex: 1 }}>Delete this goal?</span>
                         <button onClick={() => deleteGoal(g.id)}
                           style={{ background: "#f87171", color: "#fff", border: "none", borderRadius: 8,
@@ -853,9 +969,14 @@ export default function GoalSet() {
                             borderRadius: 8, padding: "7px 14px", fontSize: 13, cursor: "pointer" }}>Cancel</button>
                       </div>
                     ) : (
-                      <button onClick={() => setConfirmDelete(g.id)}
-                        style={{ background: "none", border: "none", color: "#334155", cursor: "pointer",
-                          fontSize: 13, padding: 0 }}>Delete goal…</button>
+                      <>
+                        <button onClick={() => openEditGoal(g)}
+                          style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer",
+                            fontSize: 13, padding: 0, fontWeight: 600 }}>✎ Edit goal</button>
+                        <button onClick={() => setConfirmDelete(g.id)}
+                          style={{ background: "none", border: "none", color: "#334155", cursor: "pointer",
+                            fontSize: 13, padding: 0 }}>Delete goal…</button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -1047,6 +1168,22 @@ export default function GoalSet() {
             })}
           </div>
         )}
+
+        {/* Backup & Restore */}
+        <div style={{ background: "#0c1220", border: "1px solid #1e293b", borderRadius: 16,
+          padding: "16px 18px", marginTop: 16 }}>
+          <div style={{ fontSize: 11, color: "#334155", textTransform: "uppercase",
+            letterSpacing: "0.08em", marginBottom: 10, fontWeight: 600 }}>Backup &amp; Restore</div>
+          <p style={{ fontSize: 12, color: "#475569", margin: "0 0 12px" }}>
+            Your data only lives in this browser. Export a backup occasionally, or restore one on a new device.
+          </p>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={exportData} style={{ ...ghostBtn, padding: "10px 14px", fontSize: 13 }}>Export backup</button>
+            <button onClick={triggerImport} style={{ ...ghostBtn, padding: "10px 14px", fontSize: 13 }}>Import backup</button>
+          </div>
+          <input type="file" accept="application/json" ref={importInputRef}
+            onChange={handleImportFile} style={{ display: "none" }} />
+        </div>
       </>
     );
   }
@@ -1079,7 +1216,7 @@ export default function GoalSet() {
               </div>
             )}
             {tab === "goals" && (
-              <button onClick={() => setShowGoalModal(true)}
+              <button onClick={openNewGoal}
                 style={{ background: "#f59e0b", color: "#080c14", border: "none", borderRadius: 10,
                   padding: "9px 14px", fontWeight: 700, fontSize: 14, cursor: "pointer",
                   WebkitTapHighlightColor: "transparent" }}>+ New</button>
@@ -1129,14 +1266,16 @@ export default function GoalSet() {
         </div>
 
         {/* Modals */}
-        <Modal open={showGoalModal} onClose={() => setShowGoalModal(false)} title="New Goal">
-          <GoalForm gForm={gForm} setGForm={setGForm} onSubmit={addGoal} onCancel={() => setShowGoalModal(false)} />
+        <Modal open={showGoalModal} onClose={closeGoalModal} title={editGoalId !== null ? "Edit Goal" : "New Goal"}>
+          <GoalForm gForm={gForm} setGForm={setGForm} onSubmit={saveGoal} onCancel={closeGoalModal}
+            submitLabel={editGoalId !== null ? "Save Changes" : "Create Goal"} />
         </Modal>
-        <Modal open={!!showTaskModal} onClose={() => setShowTaskModal(null)} title="Add Daily Task">
+        <Modal open={!!showTaskModal} onClose={closeTaskModal} title={editTaskId !== null ? "Edit Task" : "Add Daily Task"}>
           {showTaskModal && taskModalGoal && (
             <TaskForm goalTitle={taskModalGoal.title} goalUnit={taskModalGoal.unit}
               tForm={tForm} setTForm={setTForm}
-              onSubmit={() => addTask(showTaskModal)} onCancel={() => setShowTaskModal(null)} />
+              onSubmit={() => saveTask(showTaskModal)} onCancel={closeTaskModal}
+              submitLabel={editTaskId !== null ? "Save Changes" : "Add Task"} />
           )}
         </Modal>
 
@@ -1222,7 +1361,7 @@ export default function GoalSet() {
               </button>
             )}
             {tab === "goals" && (
-              <button onClick={() => setShowGoalModal(true)} style={{ ...primaryBtn, flex: "none", padding: "9px 16px", fontSize: 13 }}>
+              <button onClick={openNewGoal} style={{ ...primaryBtn, flex: "none", padding: "9px 16px", fontSize: 13 }}>
                 + New Goal
               </button>
             )}
@@ -1239,18 +1378,19 @@ export default function GoalSet() {
       {showGoalModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)",
           display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }}
-          onClick={() => setShowGoalModal(false)}>
+          onClick={closeGoalModal}>
           <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 18,
             padding: "28px", width: 440, maxHeight: "88vh", overflowY: "auto",
             boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }} onClick={e => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-              <span style={{ fontSize: 18, fontWeight: 700, color: "#f1f5f9" }}>New Goal</span>
-              <button onClick={() => setShowGoalModal(false)}
+              <span style={{ fontSize: 18, fontWeight: 700, color: "#f1f5f9" }}>{editGoalId !== null ? "Edit Goal" : "New Goal"}</span>
+              <button onClick={closeGoalModal}
                 style={{ background: "#1e293b", border: "none", color: "#94a3b8", borderRadius: "50%",
                   width: 30, height: 30, cursor: "pointer", fontSize: 16, display: "flex",
                   alignItems: "center", justifyContent: "center" }}>✕</button>
             </div>
-            <GoalForm gForm={gForm} setGForm={setGForm} onSubmit={addGoal} onCancel={() => setShowGoalModal(false)} />
+            <GoalForm gForm={gForm} setGForm={setGForm} onSubmit={saveGoal} onCancel={closeGoalModal}
+              submitLabel={editGoalId !== null ? "Save Changes" : "Create Goal"} />
           </div>
         </div>
       )}
@@ -1258,20 +1398,21 @@ export default function GoalSet() {
       {showTaskModal && taskModalGoal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)",
           display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }}
-          onClick={() => setShowTaskModal(null)}>
+          onClick={closeTaskModal}>
           <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 18,
             padding: "28px", width: 400, maxHeight: "88vh", overflowY: "auto",
             boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }} onClick={e => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-              <span style={{ fontSize: 18, fontWeight: 700, color: "#f1f5f9" }}>Add Daily Task</span>
-              <button onClick={() => setShowTaskModal(null)}
+              <span style={{ fontSize: 18, fontWeight: 700, color: "#f1f5f9" }}>{editTaskId !== null ? "Edit Task" : "Add Daily Task"}</span>
+              <button onClick={closeTaskModal}
                 style={{ background: "#1e293b", border: "none", color: "#94a3b8", borderRadius: "50%",
                   width: 30, height: 30, cursor: "pointer", fontSize: 16, display: "flex",
                   alignItems: "center", justifyContent: "center" }}>✕</button>
             </div>
             <TaskForm goalTitle={taskModalGoal.title} goalUnit={taskModalGoal.unit}
               tForm={tForm} setTForm={setTForm}
-              onSubmit={() => addTask(showTaskModal)} onCancel={() => setShowTaskModal(null)} />
+              onSubmit={() => saveTask(showTaskModal)} onCancel={closeTaskModal}
+              submitLabel={editTaskId !== null ? "Save Changes" : "Add Task"} />
           </div>
         </div>
       )}
