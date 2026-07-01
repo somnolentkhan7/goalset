@@ -3,6 +3,11 @@
 import { useEffect, useState, useRef } from "react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+type Schedule = {
+  freq: "daily" | "weekdays" | "custom" | "weekly";
+  days?: number[]; // 0=Sun..6=Sat, used when freq === "custom"
+  timesPerWeek?: number; // used when freq === "weekly"
+};
 type Task = {
   id: number;
   label: string;
@@ -12,6 +17,7 @@ type Task = {
   progressValue: number;
 
   note?: string;
+  schedule?: Schedule;
 };
 type Goal = {
   id: number; title: string; description: string; target: number; current: number;
@@ -41,6 +47,49 @@ function daysUntil(d: string | null | undefined): number | null {
 }
 function dateKey(y: number, m: number, d: number) {
   return `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+// Whether a task is scheduled to happen on a given date.
+function isDueOn(task: Task, date: Date): boolean {
+  const sch = task.schedule;
+  if (!sch || sch.freq === "daily") return true;
+  const dow = date.getDay();
+  if (sch.freq === "weekdays") return dow >= 1 && dow <= 5;
+  if (sch.freq === "custom") return (sch.days || []).includes(dow);
+  if (sch.freq === "weekly") return true; // any day counts toward the weekly target
+  return true;
+}
+
+function scheduleLabel(sch?: Schedule): string {
+  if (!sch || sch.freq === "daily") return "Every day";
+  if (sch.freq === "weekdays") return "Weekdays";
+  if (sch.freq === "custom") {
+    const days = [...(sch.days || [])].sort((a, b) => a - b);
+    return days.length ? days.map(d => WEEKDAY_NAMES[d]).join(" · ") : "Custom days";
+  }
+  if (sch.freq === "weekly") return `${sch.timesPerWeek || 3}x per week`;
+  return "Every day";
+}
+
+// Steps backward from fromDate to find the most recent date this task was due,
+// so streaks skip over days it wasn't scheduled instead of breaking on them.
+function prevDueDate(task: Task, fromDate: Date): string | null {
+  const d = new Date(fromDate);
+  for (let i = 0; i < 14; i++) {
+    d.setDate(d.getDate() - 1);
+    if (isDueOn(task, d)) return d.toISOString().slice(0, 10);
+  }
+  return null;
+}
+
+function mondayOf(date: Date): Date {
+  const d = new Date(date);
+  const dow = d.getDay();
+  const offset = dow === 0 ? 6 : dow - 1;
+  d.setDate(d.getDate() - offset);
+  return d;
 }
 
 // ─── Hooks ────────────────────────────────────────────────────────────────────
@@ -208,7 +257,12 @@ function GoalForm({ gForm, setGForm, onSubmit, onCancel, submitLabel = "Create G
 // ─── Task Form ────────────────────────────────────────────────────────────────
 interface TaskFormProps {
   goalTitle: string; goalUnit: string;
-  tForm: { label: string; mode: "habit" | "progress"; progressValue: string; note: string };
+  tForm: {
+    label: string; mode: "habit" | "progress"; progressValue: string; note: string;
+    scheduleFreq: "daily" | "weekdays" | "custom" | "weekly";
+    scheduleDays: number[];
+    timesPerWeek: string;
+  };
   setTForm: React.Dispatch<React.SetStateAction<TaskFormProps["tForm"]>>;
   onSubmit: () => void; onCancel: () => void;
   submitLabel?: string;
@@ -256,6 +310,61 @@ function TaskForm({ goalTitle, goalUnit, tForm, setTForm, onSubmit, onCancel, su
           ? "Just tracks a daily checkbox and streak."
           : "Completing this task also adds to the goal's progress total."}
       </p>
+
+      <label style={lbl}>Repeats</label>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+        {([
+          { v: "daily", l: "Every day" },
+          { v: "weekdays", l: "Weekdays" },
+          { v: "custom", l: "Custom days" },
+          { v: "weekly", l: "X per week" },
+        ] as const).map(opt => (
+          <button key={opt.v} type="button"
+            onClick={() => setTForm(f => ({ ...f, scheduleFreq: opt.v }))}
+            style={{
+              padding: "9px 10px", borderRadius: 10, fontSize: 12.5, fontWeight: 600,
+              cursor: "pointer", WebkitTapHighlightColor: "transparent",
+              border: `1px solid ${tForm.scheduleFreq === opt.v ? "#f59e0b" : "#1e293b"}`,
+              background: tForm.scheduleFreq === opt.v ? "#f59e0b22" : "#080c14",
+              color: tForm.scheduleFreq === opt.v ? "#f59e0b" : "#64748b",
+            }}>
+            {opt.l}
+          </button>
+        ))}
+      </div>
+
+      {tForm.scheduleFreq === "custom" && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+          {WEEKDAY_NAMES.map((n, i) => {
+            const on = tForm.scheduleDays.includes(i);
+            return (
+              <button key={i} type="button"
+                onClick={() => setTForm(f => ({
+                  ...f,
+                  scheduleDays: on ? f.scheduleDays.filter(d => d !== i) : [...f.scheduleDays, i],
+                }))}
+                style={{
+                  flex: 1, aspectRatio: "1", borderRadius: "50%", fontSize: 12, fontWeight: 700,
+                  cursor: "pointer", WebkitTapHighlightColor: "transparent",
+                  border: `1px solid ${on ? "#f59e0b" : "#1e293b"}`,
+                  background: on ? "#f59e0b" : "#080c14",
+                  color: on ? "#0f172a" : "#475569",
+                }}>
+                {n[0]}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {tForm.scheduleFreq === "weekly" && (
+        <>
+          <label style={lbl}>Times per week</label>
+          <input style={inp} type="number" inputMode="numeric" min={1} max={7} placeholder="3"
+            value={tForm.timesPerWeek}
+            onChange={e => setTForm(f => ({ ...f, timesPerWeek: e.target.value }))} />
+        </>
+      )}
 
       {tForm.mode === "progress" && (
         <>
@@ -341,6 +450,7 @@ export default function GoalSet() {
   const [editGoalId, setEditGoalId] = useState<number | null>(null);
   const [editTaskId, setEditTaskId] = useState<number | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const dragTaskRef = useRef<{ goalId: number; index: number } | null>(null);
 
   const now = new Date();
   const [calYear, setCalYear] = useState(now.getFullYear());
@@ -351,11 +461,19 @@ export default function GoalSet() {
     title: "", description: "", target: "", unit: "",
     category: "Personal", priority: "Medium", dueDate: "",
   });
-  const [tForm, setTForm] = useState<{ label: string; mode: "habit" | "progress"; progressValue: string; note: string }>({
+  const [tForm, setTForm] = useState<{
+    label: string; mode: "habit" | "progress"; progressValue: string; note: string;
+    scheduleFreq: "daily" | "weekdays" | "custom" | "weekly";
+    scheduleDays: number[];
+    timesPerWeek: string;
+  }>({
     label: "",
     mode: "habit",
     progressValue: "1",
     note: "",
+    scheduleFreq: "daily",
+    scheduleDays: [],
+    timesPerWeek: "3",
   });
 
   // ── Load from localStorage on mount ─────────────────────────────────────────
@@ -513,8 +631,10 @@ export default function GoalSet() {
   }
 
   // ── Task CRUD ──────────────────────────────────────────────────────────────
-  const emptyTForm: { label: string; mode: "habit" | "progress"; progressValue: string; note: string } =
-    { label: "", mode: "habit", progressValue: "1", note: "" };
+  const emptyTForm = {
+    label: "", mode: "habit" as const, progressValue: "1", note: "",
+    scheduleFreq: "daily" as const, scheduleDays: [] as number[], timesPerWeek: "3",
+  };
 
   function openNewTask(goalId: number) {
     setTForm(emptyTForm);
@@ -523,10 +643,14 @@ export default function GoalSet() {
   }
 
   function openEditTask(goalId: number, task: Task) {
+    const sch = task.schedule;
     setTForm({
       label: task.label, mode: task.mode,
       progressValue: task.progressValue ? String(task.progressValue) : "1",
       note: task.note || "",
+      scheduleFreq: sch?.freq || "daily",
+      scheduleDays: sch?.days || [],
+      timesPerWeek: sch?.timesPerWeek ? String(sch.timesPerWeek) : "3",
     });
     setEditTaskId(task.id);
     setShowTaskModal(goalId);
@@ -540,21 +664,38 @@ export default function GoalSet() {
   function saveTask(goalId: number) {
     if (!tForm.label.trim()) return;
     const progressValue = tForm.mode === "habit" ? 0 : Number(tForm.progressValue) || 1;
+    const schedule: Schedule = tForm.scheduleFreq === "custom"
+      ? { freq: "custom", days: tForm.scheduleDays }
+      : tForm.scheduleFreq === "weekly"
+        ? { freq: "weekly", timesPerWeek: Math.max(1, Number(tForm.timesPerWeek) || 3) }
+        : { freq: tForm.scheduleFreq };
     if (editTaskId !== null) {
       setGoals(prev => prev.map(g => g.id === goalId
         ? { ...g, tasks: g.tasks.map(t => t.id === editTaskId
-            ? { ...t, label: tForm.label, mode: tForm.mode, progressValue, note: tForm.note }
+            ? { ...t, label: tForm.label, mode: tForm.mode, progressValue, note: tForm.note, schedule }
             : t) }
         : g));
       showToast("Task updated ✓");
     } else {
-      const t: Task = { id: Date.now(), label: tForm.label, mode: tForm.mode, progressValue, note: tForm.note };
+      const t: Task = { id: Date.now(), label: tForm.label, mode: tForm.mode, progressValue, note: tForm.note, schedule };
       setGoals(prev => prev.map(g => g.id === goalId ? { ...g, tasks: [...g.tasks, t] } : g));
       showToast("Task added ✓");
     }
     setTForm(emptyTForm);
     setEditTaskId(null);
     setShowTaskModal(null);
+  }
+
+  function reorderTasks(goalId: number, fromIndex: number, toIndex: number) {
+    if (fromIndex === toIndex || toIndex < 0) return;
+    setGoals(prev => prev.map(g => {
+      if (g.id !== goalId) return g;
+      const tasks = [...g.tasks];
+      if (toIndex >= tasks.length) return g;
+      const [moved] = tasks.splice(fromIndex, 1);
+      tasks.splice(toIndex, 0, moved);
+      return { ...g, tasks };
+    }));
   }
 
   function deleteTask(goalId: number, taskId: number) {
@@ -599,18 +740,52 @@ export default function GoalSet() {
     if (!wasDone) {
       if (navigator.vibrate) navigator.vibrate(15);
       const ex = streaks[key] || { count: 0, lastDate: null };
-      const yest = new Date(); yest.setDate(yest.getDate() - 1);
-      const yKey = yest.toISOString().slice(0, 10);
-      const newCount = ex.lastDate === yKey ? ex.count + 1 : 1;
-      setStreaks(prev => ({ ...prev, [key]: { count: newCount, lastDate: today } }));
-      if (newCount > 1) showToast(`🔥 ${newCount}-day streak!`); else showToast("Done ✓");
+      const freq = task.schedule?.freq || "daily";
+
+      if (freq === "weekly") {
+        // Weekly-target tasks can be done on any day; the streak tracks
+        // consecutive weeks where the target was hit rather than daily gaps.
+        const target = task.schedule?.timesPerWeek || 3;
+        const monday = mondayOf(new Date()).toISOString().slice(0, 10);
+        const doneThisWeek = Array.from({ length: 7 }, (_, i) => {
+          const d = mondayOf(new Date()); d.setDate(d.getDate() + i);
+          const dk = d.toISOString().slice(0, 10);
+          return dk === today ? true : !!history[dk]?.[key];
+        }).filter(Boolean).length;
+        const hitTarget = doneThisWeek >= target;
+        const newCount = hitTarget ? (ex.lastDate === monday ? ex.count : ex.count + 1) : ex.count;
+        setStreaks(prev => ({ ...prev, [key]: { count: newCount, lastDate: hitTarget ? monday : ex.lastDate } }));
+        showToast(hitTarget ? `🔥 Weekly goal hit! (${newCount} weeks running)` : `${doneThisWeek}/${target} this week`);
+      } else {
+        // Daily / weekdays / custom-day tasks: only require the *previous
+        // scheduled day* to be done, so skipped non-scheduled days (e.g.
+        // weekends for a weekdays-only habit) don't break the streak.
+        const prevKey = prevDueDate(task, new Date());
+        const newCount = ex.lastDate === prevKey ? ex.count + 1 : 1;
+        setStreaks(prev => ({ ...prev, [key]: { count: newCount, lastDate: today } }));
+        if (newCount > 1) showToast(`🔥 ${newCount}-day streak!`); else showToast("Done ✓");
+      }
     }
+  }
+
+  function getWeekCount(goalId: number, taskId: number): number {
+    const key = `${goalId}-${taskId}`;
+    const monday = mondayOf(new Date());
+    const today = todayKey();
+    let count = 0;
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(monday); d.setDate(monday.getDate() + i);
+      const dk = d.toISOString().slice(0, 10);
+      if (dk === today ? completedToday[key] : history[dk]?.[key]) count++;
+    }
+    return count;
   }
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const allTasks = goals.flatMap(g => g.tasks.map(t => ({ ...t, goalId: g.id, goalTitle: g.title, goalColor: CAT_COLOR[g.category] || "#f59e0b" })));
-  const todayDoneCount = allTasks.filter(t => completedToday[`${t.goalId}-${t.id}`]).length;
-  const todayTotal = allTasks.length;
+  const dueTodayTasks = allTasks.filter(t => isDueOn(t, new Date()));
+  const todayDoneCount = dueTodayTasks.filter(t => completedToday[`${t.goalId}-${t.id}`]).length;
+  const todayTotal = dueTodayTasks.length;
   const todayPct = todayTotal === 0 ? 0 : Math.round(todayDoneCount / todayTotal * 100);
   const bestStreak = Object.values(streaks).reduce<number>((m, s) => Math.max(m, s?.count ?? 0), 0);
 
@@ -718,10 +893,14 @@ export default function GoalSet() {
     const dateStr = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
     const allDone = todayPct === 100 && todayTotal > 0;
     const ringColor = allDone ? "#34d399" : todayPct > 0 ? "#f59e0b" : "#334155";
-    const byGoal = goals.filter(g => g.tasks.length > 0).map(g => ({
-      ...g, tasks: g.tasks.map(t => ({ ...t, done: !!completedToday[`${g.id}-${t.id}`] })),
-    }));
-    const noTaskGoals = goals.filter(g => g.tasks.length === 0);
+    const today = new Date();
+    const byGoal = goals
+      .map(g => ({ ...g, tasks: g.tasks.filter(t => isDueOn(t, today)) }))
+      .filter(g => g.tasks.length > 0)
+      .map(g => ({
+        ...g, tasks: g.tasks.map(t => ({ ...t, done: !!completedToday[`${g.id}-${t.id}`] })),
+      }));
+    const noTaskGoals = goals.filter(g => g.tasks.filter(t => isDueOn(t, today)).length === 0);
 
     return (
       <>
@@ -802,11 +981,18 @@ export default function GoalSet() {
                         color: t.done ? "#475569" : "#e2e8f0",
                         textDecoration: t.done ? "line-through" : "none" }}>{t.label}</div>
                       {t.note && <div style={{ fontSize: 11, color: "#475569", marginTop: 2 }}>{t.note}</div>}
+                      {t.schedule && t.schedule.freq !== "daily" && (
+                        <div style={{ fontSize: 10, color: "#334155", marginTop: 2 }}>{scheduleLabel(t.schedule)}</div>
+                      )}
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3, flexShrink: 0 }}>
-                      {str && str.count > 1 && (
+                      {t.schedule?.freq === "weekly" ? (
+                        <span style={{ fontSize: 11, color: "#f59e0b", fontWeight: 700 }}>
+                          {getWeekCount(g.id, t.id)}/{t.schedule.timesPerWeek || 3} wk
+                        </span>
+                      ) : str && str.count > 1 ? (
                         <span style={{ fontSize: 11, color: "#f59e0b", fontWeight: 700 }}>🔥{str.count}</span>
-                      )}
+                      ) : null}
                       {t.mode === "progress" && (
                         <span style={{ fontSize: 11, color: "#334155" }}>+{t.progressValue}{g.unit ? ` ${g.unit}` : ""}</span>
                       )}
@@ -821,7 +1007,7 @@ export default function GoalSet() {
         {noTaskGoals.length > 0 && (
           <div style={{ marginTop: 8 }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: "#334155", textTransform: "uppercase",
-              letterSpacing: "0.08em", marginBottom: 10 }}>Goals without tasks</div>
+              letterSpacing: "0.08em", marginBottom: 10 }}>Nothing due today</div>
             {noTaskGoals.map(g => (
               <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px",
                 background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12, marginBottom: 8, opacity: 0.55 }}>
@@ -830,7 +1016,7 @@ export default function GoalSet() {
                 <button onClick={() => { setTab("goals"); setExpandedGoal(g.id); }}
                   style={{ background: "transparent", border: "1px solid #1e293b", color: "#64748b",
                     borderRadius: 8, padding: "6px 12px", fontSize: 12, cursor: "pointer" }}>
-                  Add tasks →
+                  {g.tasks.length === 0 ? "Add tasks →" : "View goal →"}
                 </button>
               </div>
             ))}
@@ -929,12 +1115,36 @@ export default function GoalSet() {
                     <p style={{ fontSize: 13, color: "#334155", margin: "0 0 10px" }}>No tasks yet — tasks let you track daily progress.</p>
                   )}
 
-                  {g.tasks.map(t => (
-                    <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10,
+                  {g.tasks.map((t, idx) => (
+                    <div key={t.id}
+                      draggable
+                      onDragStart={() => { dragTaskRef.current = { goalId: g.id, index: idx }; }}
+                      onDragOver={e => e.preventDefault()}
+                      onDrop={() => {
+                        const src = dragTaskRef.current;
+                        if (src && src.goalId === g.id && src.index !== idx) reorderTasks(g.id, src.index, idx);
+                        dragTaskRef.current = null;
+                      }}
+                      style={{ display: "flex", alignItems: "center", gap: 8,
                       padding: "10px 12px", background: "#080c14", borderRadius: 10, marginBottom: 6 }}>
-                      <div style={{ flex: 1 }}>
+                      <span title="Drag to reorder"
+                        style={{ cursor: "grab", color: "#334155", fontSize: 14, flexShrink: 0, userSelect: "none" }}>⠿</span>
+                      <div style={{ display: "flex", flexDirection: "column", flexShrink: 0 }}>
+                        <button onClick={() => reorderTasks(g.id, idx, idx - 1)} disabled={idx === 0}
+                          style={{ background: "none", border: "none", color: idx === 0 ? "#1e293b" : "#475569",
+                            cursor: idx === 0 ? "default" : "pointer", fontSize: 10, lineHeight: 1,
+                            padding: "2px 4px", WebkitTapHighlightColor: "transparent" }}>▲</button>
+                        <button onClick={() => reorderTasks(g.id, idx, idx + 1)}
+                          disabled={idx === g.tasks.length - 1}
+                          style={{ background: "none", border: "none",
+                            color: idx === g.tasks.length - 1 ? "#1e293b" : "#475569",
+                            cursor: idx === g.tasks.length - 1 ? "default" : "pointer", fontSize: 10, lineHeight: 1,
+                            padding: "2px 4px", WebkitTapHighlightColor: "transparent" }}>▼</button>
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13, color: "#94a3b8" }}>{t.label}</div>
                         {t.note && <div style={{ fontSize: 11, color: "#475569", marginTop: 1 }}>{t.note}</div>}
+                        <div style={{ fontSize: 10, color: "#334155", marginTop: 1 }}>{scheduleLabel(t.schedule)}</div>
                       </div>
                       {t.mode === "progress" && (
                         <span style={{ fontSize: 11, color: "#334155", flexShrink: 0 }}>+{t.progressValue} {g.unit || "pts"}</span>
