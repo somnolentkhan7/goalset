@@ -1416,7 +1416,7 @@ export default function GoalSet() {
           display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "0 20px" }}>
           <div>
-            <div style={{ fontSize: 10, color: "#334155", textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700 }}>StrongGoals</div>
+            <div style={{ fontSize: 10, color: "#334155", letterSpacing: "0.12em", fontWeight: 700 }}>StrongGoals</div>
             <div style={{ fontSize: 18, fontWeight: 800, color: "#f1f5f9", lineHeight: 1 }}>
               {tab === "today" ? "Today" : tab === "goals" ? "Goals" : "Progress"}
             </div>
