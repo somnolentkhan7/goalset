@@ -3,7 +3,16 @@
 import { useEffect, useState, useRef } from "react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type Task = { id: number; label: string; progressValue: number; note?: string };
+type Task = {
+  id: number;
+  label: string;
+
+  mode: "habit" | "progress";
+
+  progressValue: number;
+
+  note?: string;
+};
 type Goal = {
   id: number; title: string; description: string; target: number; current: number;
   unit: string; category: string; priority: string; dueDate: string; createdAt: string; tasks: Task[];
@@ -198,7 +207,7 @@ function GoalForm({ gForm, setGForm, onSubmit, onCancel }: GoalFormProps) {
 // ─── Task Form ────────────────────────────────────────────────────────────────
 interface TaskFormProps {
   goalTitle: string; goalUnit: string;
-  tForm: { label: string; progressValue: string; note: string };
+  tForm: { label: string; mode: "habit" | "progress"; progressValue: string; note: string };
   setTForm: React.Dispatch<React.SetStateAction<TaskFormProps["tForm"]>>;
   onSubmit: () => void; onCancel: () => void;
 }
@@ -213,9 +222,46 @@ function TaskForm({ goalTitle, goalUnit, tForm, setTForm, onSubmit, onCancel }: 
         onChange={e => setTForm(f => ({ ...f, label: e.target.value }))}
         onKeyDown={e => e.key === "Enter" && onSubmit()} autoFocus />
 
-      <label style={lbl}>Progress per completion ({goalUnit || "pts"})</label>
-      <input style={inp} type="number" inputMode="decimal" placeholder="1" value={tForm.progressValue}
-        onChange={e => setTForm(f => ({ ...f, progressValue: e.target.value }))} />
+      <label style={lbl}>Task type</label>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <button
+          type="button"
+          onClick={() => setTForm(f => ({ ...f, mode: "habit" }))}
+          style={{
+            flex: 1, padding: "10px 12px", borderRadius: 10, fontSize: 13, fontWeight: 600,
+            cursor: "pointer", WebkitTapHighlightColor: "transparent",
+            border: `1px solid ${tForm.mode === "habit" ? "#f59e0b" : "#1e293b"}`,
+            background: tForm.mode === "habit" ? "#f59e0b22" : "#080c14",
+            color: tForm.mode === "habit" ? "#f59e0b" : "#64748b",
+          }}>
+          Habit
+        </button>
+        <button
+          type="button"
+          onClick={() => setTForm(f => ({ ...f, mode: "progress" }))}
+          style={{
+            flex: 1, padding: "10px 12px", borderRadius: 10, fontSize: 13, fontWeight: 600,
+            cursor: "pointer", WebkitTapHighlightColor: "transparent",
+            border: `1px solid ${tForm.mode === "progress" ? "#f59e0b" : "#1e293b"}`,
+            background: tForm.mode === "progress" ? "#f59e0b22" : "#080c14",
+            color: tForm.mode === "progress" ? "#f59e0b" : "#64748b",
+          }}>
+          Adds progress
+        </button>
+      </div>
+      <p style={{ fontSize: 11, color: "#334155", marginTop: -6, marginBottom: 12 }}>
+        {tForm.mode === "habit"
+          ? "Just tracks a daily checkbox and streak."
+          : "Completing this task also adds to the goal's progress total."}
+      </p>
+
+      {tForm.mode === "progress" && (
+        <>
+          <label style={lbl}>Progress per completion ({goalUnit || "pts"})</label>
+          <input style={inp} type="number" inputMode="decimal" placeholder="1" value={tForm.progressValue}
+            onChange={e => setTForm(f => ({ ...f, progressValue: e.target.value }))} />
+        </>
+      )}
 
       <label style={lbl}>Note (optional)</label>
       <input style={inp} placeholder="e.g. Outdoors only" value={tForm.note}
@@ -289,6 +335,7 @@ export default function GoalSet() {
   const [expandedGoal, setExpandedGoal] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [hydrated, setHydrated] = useState(false);
 
   const now = new Date();
   const [calYear, setCalYear] = useState(now.getFullYear());
@@ -299,29 +346,82 @@ export default function GoalSet() {
     title: "", description: "", target: "", unit: "",
     category: "Personal", priority: "Medium", dueDate: "",
   });
-  const [tForm, setTForm] = useState({ label: "", progressValue: "1", note: "" });
+  const [tForm, setTForm] = useState<{ label: string; mode: "habit" | "progress"; progressValue: string; note: string }>({
+    label: "",
+    mode: "habit",
+    progressValue: "1",
+    note: "",
+  });
 
-  const didInit = useRef(false);
+  // ── Load from localStorage on mount ─────────────────────────────────────────
   useEffect(() => {
-    if (didInit.current) return;
-    didInit.current = true;
     try {
-      const g = sessionStorage.getItem("gs-goals"); if (g) setGoals(JSON.parse(g));
-      const s = sessionStorage.getItem("gs-streaks"); if (s) setStreaks(JSON.parse(s));
-      const h = sessionStorage.getItem("gs-history"); if (h) setHistory(JSON.parse(h));
-      const c = sessionStorage.getItem("gs-completed");
-      if (c) { const p = JSON.parse(c); if (p.date === todayKey()) setCompletedToday(p.tasks || {}); }
-    } catch { }
+      const g = localStorage.getItem("gs-goals");
+      const s = localStorage.getItem("gs-streaks");
+      const h = localStorage.getItem("gs-history");
+      const c = localStorage.getItem("gs-completed");
+
+      if (g) setGoals(JSON.parse(g));
+      if (s) setStreaks(JSON.parse(s));
+      if (h) setHistory(JSON.parse(h));
+
+      if (c) {
+        const p = JSON.parse(c);
+        if (p.date === todayKey()) setCompletedToday(p.tasks || {});
+      }
+    } catch (e) {
+      console.log("load error", e);
+    } finally {
+      // Only start persisting AFTER the initial load has been applied,
+      // so we never clobber saved data with the pre-load empty defaults.
+      setHydrated(true);
+    }
   }, []);
 
-  useEffect(() => { try { sessionStorage.setItem("gs-goals", JSON.stringify(goals)); } catch { } }, [goals]);
-  useEffect(() => { try { sessionStorage.setItem("gs-streaks", JSON.stringify(streaks)); } catch { } }, [streaks]);
-  useEffect(() => { try { sessionStorage.setItem("gs-history", JSON.stringify(history)); } catch { } }, [history]);
   useEffect(() => {
-    const today = todayKey();
-    try { sessionStorage.setItem("gs-completed", JSON.stringify({ date: today, tasks: completedToday })); } catch { }
-    setHistory(prev => ({ ...prev, [today]: completedToday }));
-  }, [completedToday]);
+    if (!hydrated) return;
+    try {
+      localStorage.setItem("gs-goals", JSON.stringify(goals));
+    } catch {}
+  }, [goals, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      localStorage.setItem("gs-streaks", JSON.stringify(streaks));
+    } catch {}
+  }, [streaks, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      localStorage.setItem("gs-history", JSON.stringify(history));
+    } catch {}
+  }, [history, hydrated]);
+
+  // Persist today's checkmarks — this was previously never written at all,
+  // so completed tasks reset every time the app reloaded.
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      localStorage.setItem("gs-completed", JSON.stringify({ date: todayKey(), tasks: completedToday }));
+    } catch {}
+  }, [completedToday, hydrated]);
+
+  // Reset completedToday when the calendar day rolls over.
+  // Previously this read back from localStorage, but since gs-completed was
+  // never written, it reset the in-memory checklist to {} every 60 seconds.
+  const lastDayRef = useRef(todayKey());
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const today = todayKey();
+      if (lastDayRef.current !== today) {
+        lastDayRef.current = today;
+        setCompletedToday({});
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   // ── Toast ──────────────────────────────────────────────────────────────────
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 2200); }
@@ -337,9 +437,38 @@ export default function GoalSet() {
   }
 
   function deleteGoal(id: number) {
+    const goal = goals.find(g => g.id === id);
     setGoals(prev => prev.filter(g => g.id !== id));
     setExpandedGoal(null);
     setConfirmDelete(null);
+
+    // Clean up any streak/history/completed entries tied to this goal's tasks
+    // so they don't linger as orphaned data.
+    if (goal) {
+      const taskKeys = goal.tasks.map(t => `${id}-${t.id}`);
+      if (taskKeys.length) {
+        setStreaks(prev => {
+          const next = { ...prev };
+          taskKeys.forEach(k => delete next[k]);
+          return next;
+        });
+        setCompletedToday(prev => {
+          const next = { ...prev };
+          taskKeys.forEach(k => delete next[k]);
+          return next;
+        });
+        setHistory(prev => {
+          const next: History = {};
+          for (const [day, entries] of Object.entries(prev)) {
+            const filtered = { ...entries };
+            taskKeys.forEach(k => delete filtered[k]);
+            next[day] = filtered;
+          }
+          return next;
+        });
+      }
+    }
+
     showToast("Goal deleted");
   }
 
@@ -351,26 +480,63 @@ export default function GoalSet() {
   // ── Task CRUD ──────────────────────────────────────────────────────────────
   function addTask(goalId: number) {
     if (!tForm.label.trim()) return;
-    const t: Task = { id: Date.now(), label: tForm.label, progressValue: Number(tForm.progressValue) || 1, note: tForm.note };
+    const t: Task = {
+      id: Date.now(),
+      label: tForm.label,
+      mode: tForm.mode,
+      progressValue:
+        tForm.mode === "habit"
+          ? 0
+          : Number(tForm.progressValue) || 1,
+      note: tForm.note,
+    };
     setGoals(prev => prev.map(g => g.id === goalId ? { ...g, tasks: [...g.tasks, t] } : g));
-    setTForm({ label: "", progressValue: "1", note: "" });
+    setTForm({ label: "", mode: "habit", progressValue: "1", note: "" });
     setShowTaskModal(null);
     showToast("Task added ✓");
   }
 
   function deleteTask(goalId: number, taskId: number) {
     setGoals(prev => prev.map(g => g.id === goalId ? { ...g, tasks: g.tasks.filter(t => t.id !== taskId) } : g));
+    const key = `${goalId}-${taskId}`;
+    setStreaks(prev => { const next = { ...prev }; delete next[key]; return next; });
+    setCompletedToday(prev => { const next = { ...prev }; delete next[key]; return next; });
+    setHistory(prev => {
+      const next: History = {};
+      for (const [day, entries] of Object.entries(prev)) {
+        const filtered = { ...entries };
+        delete filtered[key];
+        next[day] = filtered;
+      }
+      return next;
+    });
   }
 
   // ── Toggle task ────────────────────────────────────────────────────────────
   function toggleTask(goalId: number, task: Task) {
     const key = `${goalId}-${task.id}`;
     const wasDone = !!completedToday[key];
+    const today = todayKey();
+
     setCompletedToday(prev => ({ ...prev, [key]: !wasDone }));
-    updateGoalProgress(goalId, wasDone ? -task.progressValue : task.progressValue);
+
+    // Record completion in `history` too — this was never written before,
+    // so the calendar tab and per-goal sparklines had no data to show.
+    setHistory(prev => ({
+      ...prev,
+      [today]: { ...(prev[today] || {}), [key]: !wasDone },
+    }));
+
+    if (task.mode === "progress") {
+      updateGoalProgress(
+        goalId,
+        wasDone
+          ? -task.progressValue
+          : task.progressValue
+      );
+    }
     if (!wasDone) {
       if (navigator.vibrate) navigator.vibrate(15);
-      const today = todayKey();
       const ex = streaks[key] || { count: 0, lastDate: null };
       const yest = new Date(); yest.setDate(yest.getDate() - 1);
       const yKey = yest.toISOString().slice(0, 10);
@@ -533,7 +699,9 @@ export default function GoalSet() {
                       {str && str.count > 1 && (
                         <span style={{ fontSize: 11, color: "#f59e0b", fontWeight: 700 }}>🔥{str.count}</span>
                       )}
-                      <span style={{ fontSize: 11, color: "#334155" }}>+{t.progressValue}{g.unit ? ` ${g.unit}` : ""}</span>
+                      {t.mode === "progress" && (
+                        <span style={{ fontSize: 11, color: "#334155" }}>+{t.progressValue}{g.unit ? ` ${g.unit}` : ""}</span>
+                      )}
                     </div>
                   </button>
                 );
@@ -656,7 +824,9 @@ export default function GoalSet() {
                         <div style={{ fontSize: 13, color: "#94a3b8" }}>{t.label}</div>
                         {t.note && <div style={{ fontSize: 11, color: "#475569", marginTop: 1 }}>{t.note}</div>}
                       </div>
-                      <span style={{ fontSize: 11, color: "#334155", flexShrink: 0 }}>+{t.progressValue} {g.unit || "pts"}</span>
+                      {t.mode === "progress" && (
+                        <span style={{ fontSize: 11, color: "#334155", flexShrink: 0 }}>+{t.progressValue} {g.unit || "pts"}</span>
+                      )}
                       <button onClick={() => deleteTask(g.id, t.id)}
                         style={{ background: "none", border: "none", color: "#334155", cursor: "pointer",
                           fontSize: 16, padding: "4px 8px", WebkitTapHighlightColor: "transparent" }}>✕</button>
